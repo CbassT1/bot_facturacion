@@ -1,0 +1,31 @@
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Bases de datos (¡Muy importante no subir datos reales!)
+*.db
+*.sqlite
+*.sqlite3
+app/database/*.db
+
+# Variables de entorno y contraseñas
+.env
+secret.key
+
+# Archivos temporales y caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Archivos de Playwright (si guardaste estados de sesión)
+state.json
+
+# Carpeta de pruebas personal
+PRUEBAS/
+
+# Archivos de Excel de referencia
+unidades_medida.xlsx
+claves_sat.xlsx
