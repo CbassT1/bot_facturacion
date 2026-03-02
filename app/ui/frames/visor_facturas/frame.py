@@ -394,41 +394,36 @@ class VisorFacturasFrame(ttk.Frame):
 
         db = SessionLocal()
         try:
+            # --- CAPTURAMOS LO QUE HAY EN LA PANTALLA ---
+            metodo_sel = self.panel_datos.var_metodo.get()
+            forma_sel = self.panel_datos.var_forma.get()
+            uso_sel = self.panel_datos.var_uso.get()
+            usd_activo = self.panel_datos.var_usd.get()
+
+            # ¡AQUÍ ESTÁ LA CORRECCIÓN! Usamos var_fx en lugar de var_tipo_cambio
+            tc_valor = self.panel_datos.var_fx.get()
+
             prov_name = (getattr(fact.cliente, "proveedor", "") or "").strip()
 
-            user = self.panel_datos.var_manual_user.get().strip()
-            pwd = self.panel_datos.var_manual_pass.get().strip()
-
-            if prov_name and user and pwd:
-                cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=prov_name).first()
-                if not cred:
-                    cred = ProveedorCredencial(nombre_proveedor=prov_name)
-                    db.add(cred)
-                cred.usuario = user
-                cred.password_encriptado = encrypt_password(pwd)
-
-            dat = getattr(fact, "datos_factura", None)
             nueva_factura = FacturaGuardada(
                 archivo_origen=getattr(fact, "archivo_origen", "SIN_ARCHIVO"),
                 hoja_origen=getattr(fact, "hoja_origen", ""),
                 rfc_cliente=rfc,
                 proveedor=prov_name,
-                metodo_pago=getattr(dat, "metodo_pago", "PUE") if dat else "PUE",
-                forma_pago=getattr(dat, "forma_pago", "") if dat else "",
-                uso_cfdi=getattr(dat, "uso_cfdi", "") if dat else "",
-                es_usd=getattr(dat, "usd", False) if dat else False,
-                tipo_cambio=str(getattr(dat, "tipo_cambio", "")) if dat and getattr(dat, "tipo_cambio", None) else None,
+                metodo_pago=metodo_sel,
+                forma_pago=forma_sel,
+                uso_cfdi=uso_sel,
+                es_usd=bool(usd_activo),
+                tipo_cambio=str(tc_valor) if tc_valor else None,
                 total=float(getattr(fact, "total", 0.0) or 0.0),
-                notas_extra=getattr(dat, "info_extra", "") if dat else "",
+                notas_extra=self.panel_datos.txt_extra.get("1.0", "end-1c"),
                 estado="Pendiente",
-                es_automatica=bool(getattr(dat, "emitir_y_enviar", False)) if dat else False,
                 conceptos_json=json.dumps(conceptos_list, ensure_ascii=False)
             )
 
             db.add(nueva_factura)
             db.commit()
-
-            self.controller.set_status("¡Factura aprobada y enviada a la fila!", auto_clear_ms=3000)
+            self.controller.set_status("¡Factura enviada a la fila con tus cambios!", auto_clear_ms=3000)
             self._remover_factura_memoria(fact)
 
         except Exception as e:
@@ -459,3 +454,4 @@ class VisorFacturasFrame(ttk.Frame):
                 self.panel_left.autoselect_first()
             else:
                 self._clear_view()
+                self.controller.show("pendientes")

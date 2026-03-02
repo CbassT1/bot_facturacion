@@ -67,7 +67,6 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
 
                 caja_rfc = page.get_by_role("textbox", name="Ingresa el RFC de tu cliente")
                 caja_rfc.wait_for(state="visible", timeout=15000)
-
                 caja_rfc.click(force=True)
                 page.wait_for_timeout(500)
 
@@ -84,9 +83,8 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                 uso_cfdi_bd = getattr(factura, "uso_cfdi", "G03") or "G03"
                 codigo_uso = uso_cfdi_bd[:3]
 
-                caja_busqueda_cfdi.type(codigo_uso, delay=150)
+                caja_busqueda_cfdi.type(codigo_uso, delay=100)
                 page.wait_for_timeout(2000)
-                # Volvemos al ENTER obligatorio
                 caja_busqueda_cfdi.press("Enter")
                 page.wait_for_timeout(1000)
 
@@ -96,29 +94,29 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                 page.get_by_role("listitem").filter(has_text="I - Factura").click()
                 page.wait_for_timeout(1500)
 
-                # --- PASO 5: Moneda y Tipo de Cambio (Condicional USD) ---
-                # Cast a string/bool en caso de que SQLite lo guarde como 1 o "True"
-                es_usd = getattr(factura, "es_usd", False)
-                if str(es_usd).lower() in ["true", "1"]:
+                # --- PASO 5: Moneda y Tipo de Cambio ---
+                # Validación a prueba de balas para saber si es USD (soporta True, "True", 1, "1")
+                es_usd_valor = str(getattr(factura, "es_usd", "")).strip().lower()
+                if es_usd_valor in ["true", "1", "t", "y", "yes"]:
                     log_callback("Cambiando moneda a USD...")
 
-                    # El selector que sacaste para la caja de MXN
+                    # Clic en el botón de MXN usando tu localizador exacto
                     page.locator("div").filter(has_text=re.compile(r"^MXN - Peso Mexicano$")).click()
+                    page.wait_for_timeout(500)
 
+                    # Buscar USD
                     caja_buscar_moneda = page.get_by_role("textbox", name="Escribe para buscar...")
                     caja_buscar_moneda.click()
-
-                    caja_buscar_moneda.type("USD", delay=150)
+                    caja_buscar_moneda.type("USD", delay=100)
                     page.wait_for_timeout(2000)
-
-                    # ENTER para elegir USD
                     caja_buscar_moneda.press("Enter")
-                    page.wait_for_timeout(1500)
+                    page.wait_for_timeout(1000)
 
                     # Tipo de cambio
                     tipo_cambio = getattr(factura, "tipo_cambio", "") or ""
                     if tipo_cambio:
                         log_callback(f"Ingresando tipo de cambio: {tipo_cambio}")
+                        # Localizador exacto que nos diste
                         caja_tc = page.get_by_role("textbox", name="Ingresa tipo de cambio")
                         caja_tc.click()
                         caja_tc.fill(str(tipo_cambio))
@@ -130,19 +128,20 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     ".selectinput.ng-untouched.ng-pristine.ng-invalid > .below > .single > .placeholder").first
                 caja_vacia_1.click()
                 page.get_by_role("listitem").filter(has_text="- No aplica").click()
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1000)
 
-                # --- PASO 7: Método de Pago ---
+                # --- PASO 7: Metodo de Pago ---
                 log_callback("Seleccionando Método de Pago...")
                 metodo_pago = getattr(factura, "metodo_pago", "PUE").upper()
                 caja_vacia_2 = page.locator(
                     ".selectinput.ng-untouched.ng-pristine.ng-invalid > .below > .single > .placeholder").first
                 caja_vacia_2.click()
+                page.wait_for_timeout(500)
 
                 if "PPD" in metodo_pago:
-                    page.get_by_role("listitem").filter(has_text="PPD - Pago en parcialidades o").click()
+                    page.get_by_role("listitem").filter(has_text=re.compile("PPD")).first.click()
                 else:
-                    # Corrección: Ahora usa el listitem con re.compile para encontrar PUE de manera segura
+                    # Usamos listitem igual que PPD para evitar problemas de formato de texto en PUE
                     page.get_by_role("listitem").filter(has_text=re.compile("PUE")).first.click()
 
                 page.wait_for_timeout(1500)
@@ -156,14 +155,12 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     caja_vacia_3 = page.locator(
                         ".selectinput.ng-untouched.ng-pristine.ng-invalid > .below > .single > .placeholder").first
                     caja_vacia_3.click()
+                    page.wait_for_timeout(500)
 
                     caja_buscar_forma = page.get_by_role("textbox", name="Escribe para buscar...")
                     caja_buscar_forma.click()
-
-                    caja_buscar_forma.type(codigo_forma, delay=150)
+                    caja_buscar_forma.type(codigo_forma, delay=100)
                     page.wait_for_timeout(2000)
-
-                    # ENTER para elegir Forma de Pago
                     caja_buscar_forma.press("Enter")
                     page.wait_for_timeout(1000)
                 else:

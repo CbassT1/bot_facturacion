@@ -19,7 +19,6 @@ class PendientesFrame(ttk.Frame):
         header = ttk.Frame(self)
         header.pack(fill="x", padx=12, pady=(12, 6))
 
-        ttk.Button(header, text="Volver al Visor", command=lambda: self.controller.show("visor")).pack(side="left")
         ttk.Button(header, text="Menú Principal", command=lambda: self.controller.show("menu")).pack(side="left",
                                                                                                      padx=(8, 0))
 
