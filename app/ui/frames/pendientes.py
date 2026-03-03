@@ -220,6 +220,9 @@ class PendientesFrame(ttk.Frame):
 
         # 4. Función de trabajo en segundo plano
         def _worker():
+            import asyncio
+            asyncio.set_event_loop(asyncio.new_event_loop())  # <-- VACUNA PARA PLAYWRIGHT EN WINDOWS
+
             ejecutar_bot(ids, _log)
             # Al terminar, avisar a la UI que reactive todo
             self.controller.after(0, self._on_bot_finished)

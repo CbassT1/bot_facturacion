@@ -75,7 +75,28 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
 
                     caja_rfc.fill(rfc_cliente)
                     caja_rfc.press("Enter")
-                    page.wait_for_timeout(3000)
+                    page.wait_for_timeout(4000)  # Esperamos a que el sistema procese el RFC
+
+                    # --- PASO 2.5: SUCURSAL (Solo XISISA y VIESA) ---
+                    if "XISISA" in nombre_prov or "VIESA" in nombre_prov:
+                        sucursal_bd = getattr(factura, "sucursal", "MONTERREY")
+                        if not sucursal_bd: sucursal_bd = "MONTERREY"
+                        sucursal_bd = sucursal_bd.upper()
+
+                        log_callback(f"Configurando sucursal {sucursal_bd} para {nombre_prov}...")
+
+                        caja_lugar = page.locator("div").filter(
+                            has_text=re.compile(r"^Lugar de Expedición", re.IGNORECASE)).locator(".selectinput").first
+                        caja_lugar.click(force=True)
+                        page.wait_for_timeout(500)
+
+                        if "XISISA" in nombre_prov:
+                            texto_suc = "- Matriz" if sucursal_bd == "MONTERREY" else "- Guadalajara"
+                        else:  # VIESA
+                            texto_suc = "- MONTERREY" if sucursal_bd == "MONTERREY" else "- GUADALAJARA"
+
+                        page.get_by_role("listitem").filter(has_text=texto_suc).click()
+                        page.wait_for_timeout(1000)
 
                     # --- PASO 3: Uso de CFDI ---
                     log_callback("Seleccionando Uso de CFDI...")
@@ -84,12 +105,23 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     caja_busqueda_cfdi.click()
 
                     uso_cfdi_bd = getattr(factura, "uso_cfdi", "G03") or "G03"
-                    codigo_uso = uso_cfdi_bd[:3]
-
-                    caja_busqueda_cfdi.type(codigo_uso, delay=100)
+                    caja_busqueda_cfdi.type(uso_cfdi_bd[:3], delay=100)
                     page.wait_for_timeout(2000)
                     caja_busqueda_cfdi.press("Enter")
                     page.wait_for_timeout(1000)
+
+                    # --- PASO 3.5: ESCUDO PARA ALTA DE CLIENTES ---
+                    log_callback("Verificando registro del cliente...")
+                    caja_razon = page.get_by_role("textbox", name=re.compile(r"Ingresa la Razón Social", re.IGNORECASE))
+                    razon_social = caja_razon.input_value().strip()
+
+                    if not razon_social:
+                        log_callback("⚠️ ALERTA: Razón Social vacía. Cliente NO registrado.")
+                        log_callback("El bot se pausará. Realiza el alta manual del cliente en la ventana...")
+                        log_callback("Al terminar el alta, dale a 'Resume' (Play) en el inspector para continuar.")
+                        page.pause()
+                        # Damos un respiro después de quitar la pausa por si la página hace recargas
+                        page.wait_for_timeout(2000)
 
                     # --- PASO 4: Tipo de Comprobante ---
                     log_callback("Seleccionando Tipo de Comprobante...")

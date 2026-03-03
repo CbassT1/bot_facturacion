@@ -68,6 +68,7 @@ class FacturaGuardada(Base):
     uso_cfdi = Column(String(5))
     es_usd = Column(Boolean, default=False)
     tipo_cambio = Column(String(20), nullable=True)
+    sucursal = Column(String(100), nullable=True)
 
     total = Column(Float, nullable=True)
     notas_extra = Column(Text, nullable=True)
@@ -91,4 +92,4 @@ engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})

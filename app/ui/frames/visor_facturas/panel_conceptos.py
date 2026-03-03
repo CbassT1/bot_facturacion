@@ -613,10 +613,26 @@ class PanelConceptos(ttk.Frame):
         if not f:
             return
 
-        total = float(getattr(f, "total", 0.0) or 0.0)
+        # 1. Extraemos la lista actual de conceptos (incluyendo los que agregaste/editaste)
+        conceptos = list(getattr(f, "conceptos", []) or [])
+
+        # 2. Sumamos (Cantidad * Precio Unitario) de cada fila para obtener el Subtotal
+        subtotal = 0.0
+        for c in conceptos:
+            cant = float(getattr(c, "cantidad", 0) or 0)
+            precio = float(getattr(c, "precio_unitario", getattr(c, "valor_unitario", 0)) or 0)
+            subtotal += (cant * precio)
+
+        # 3. Aplicamos el IVA (Estándar 16% en México)
+        # Nota: Multiplicamos por 1.16 para sacar el Total final.
+        nuevo_total = subtotal * 1.16
+
+        # 4. ¡LA MAGIA! Actualizamos el objeto en memoria.
+        # Así, cuando frame.py le dé a "Aprobar", jalará este nuevo valor a la Base de Datos.
+        f.total = nuevo_total
 
         try:
-            self.lbl_total.config(text=f"TOTAL: ${total:,.2f}")
+            self.lbl_total.config(text=f"TOTAL (+ 16% IVA): ${nuevo_total:,.2f}")
         except Exception:
             pass
 

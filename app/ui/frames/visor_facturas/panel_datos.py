@@ -535,3 +535,4 @@ class PanelDatos(ttk.Frame):
         self._update_extra_fields()
         self._on_rfc_live()
         self._on_fx_live()
+

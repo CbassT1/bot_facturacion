@@ -400,6 +400,7 @@ class VisorFacturasFrame(ttk.Frame):
             forma_sel = self.panel_datos.var_forma.get()
             uso_sel = self.panel_datos.var_uso.get()
             usd_activo = self.panel_datos.var_usd.get()
+            sucursal_sel = self.panel_datos.var_sucursal.get()
 
             # ¡AQUÍ ESTÁ LA CORRECCIÓN! Usamos var_fx en lugar de var_tipo_cambio
             tc_valor = self.panel_datos.var_fx.get()
@@ -416,6 +417,7 @@ class VisorFacturasFrame(ttk.Frame):
                 uso_cfdi=uso_sel,
                 es_usd=bool(usd_activo),
                 tipo_cambio=str(tc_valor) if tc_valor else None,
+                sucursal=sucursal_sel,
                 total=float(getattr(fact, "total", 0.0) or 0.0),
                 notas_extra=self.panel_datos.txt_extra.get("1.0", "end-1c"),
                 estado="Pendiente",
