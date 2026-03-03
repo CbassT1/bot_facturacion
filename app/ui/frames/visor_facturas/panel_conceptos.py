@@ -24,25 +24,16 @@ from app.ui.frames.visor_facturas.catalogs import Catalogs
 
 
 class PanelConceptos(ttk.Frame):
-    """
-    Panel autocontenido para la tabla de conceptos:
-    - búsqueda
-    - treeview con scrollbars modernas
-    - detalle inferior (concepto completo + precio)
-    - total al final
-    - edición por doble click
-    - menú contextual: copiar/cortar/pegar/duplicar/eliminar/buscar clave
-    """
 
     def __init__(
-        self,
-        master: ttk.Frame,
-        *,
-        controller,
-        catalogs: Catalogs,
-        get_factura: Callable[[], Optional[Factura]],
-        mark_saved: Callable[[str], None],
-        default_col_widths: Optional[Dict[str, int]] = None,
+            self,
+            master: ttk.Frame,
+            *,
+            controller,
+            catalogs: Catalogs,
+            get_factura: Callable[[], Optional[Factura]],
+            mark_saved: Callable[[str], None],
+            default_col_widths: Optional[Dict[str, int]] = None,
     ):
         super().__init__(master)
 
@@ -53,6 +44,7 @@ class PanelConceptos(ttk.Frame):
 
         self._default_col_widths = default_col_widths or {
             "cantidad": 80,
+            "tipo_ps": 50,  # <-- NUEVA COLUMNA P/S
             "clv_unid": 110,
             "unid_nombre": 260,
             "clv_prod": 150,
@@ -74,6 +66,24 @@ class PanelConceptos(ttk.Frame):
 
         self._build()
 
+    # ---------------- LÓGICA DE PRODUCTO/SERVICIO ----------------
+    def _infer_ps(self, c: Concepto) -> str:
+        """
+        Infiere si es Producto o Servicio según el SAT, a menos que el
+        usuario ya lo haya forzado manualmente.
+        """
+        # Si el usuario ya lo cambió manualmente, respetamos su decisión
+        if hasattr(c, "tipo_ps") and getattr(c, "tipo_ps"):
+            return getattr(c, "tipo_ps")
+
+        # Lógica automática del SAT
+        clv_unid = (getattr(c, "clave_unidad", "") or "").upper()
+        clv_prod = str(getattr(c, "clave_prod_serv", "") or "")
+
+        if clv_unid in ["E48", "ACT"] or clv_prod.startswith(("8", "9")):
+            return "S"
+        return "P"
+
     # ---------------- UI ----------------
     def _build(self):
         head = ttk.Frame(self)
@@ -92,7 +102,8 @@ class PanelConceptos(ttk.Frame):
         self.frm_conceptos.columnconfigure(0, weight=1)
         self.frm_conceptos.rowconfigure(0, weight=1)
 
-        cols = ("cantidad", "clv_unid", "unid_nombre", "clv_prod", "prod_nombre", "concepto", "p_unit")
+        # AGREGAMOS "tipo_ps" a las columnas
+        cols = ("cantidad", "tipo_ps", "clv_unid", "unid_nombre", "clv_prod", "prod_nombre", "concepto", "p_unit")
         self.tree = ttk.Treeview(
             self.frm_conceptos,
             columns=cols,
@@ -102,6 +113,7 @@ class PanelConceptos(ttk.Frame):
         )
 
         self.tree.heading("cantidad", text="Cant.")
+        self.tree.heading("tipo_ps", text="P/S")  # <-- TÍTULO
         self.tree.heading("clv_unid", text="Clave unid.")
         self.tree.heading("unid_nombre", text="Unidad (nombre)")
         self.tree.heading("clv_prod", text="Clave prod/serv")
@@ -112,6 +124,7 @@ class PanelConceptos(ttk.Frame):
         self.tree["displaycolumns"] = cols
 
         self.tree.column("cantidad", width=80, anchor="w", stretch=False)
+        self.tree.column("tipo_ps", width=50, anchor="center", stretch=False)  # <-- COLUMNA
         self.tree.column("clv_unid", width=110, anchor="center", stretch=False)
         self.tree.column("unid_nombre", width=240, anchor="w", stretch=False)
         self.tree.column("clv_prod", width=150, anchor="center", stretch=False)
@@ -119,7 +132,6 @@ class PanelConceptos(ttk.Frame):
         self.tree.column("concepto", width=520, minwidth=260, anchor="w", stretch=True)
         self.tree.column("p_unit", width=220, minwidth=180, anchor="e", stretch=False)
 
-        # Persisted widths si existen en settings
         try:
             if getattr(self.controller, "_settings", None):
                 self.apply_tree_col_widths(self.controller._settings.tree_col_widths)
@@ -166,11 +178,13 @@ class PanelConceptos(ttk.Frame):
         detail.grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 6))
         detail.columnconfigure(1, weight=1)
 
-        ttk.Label(detail, text="Concepto (completo):", style="Muted.TLabel").grid(row=0, column=0, sticky="nw", padx=(0, 8))
+        ttk.Label(detail, text="Concepto (completo):", style="Muted.TLabel").grid(row=0, column=0, sticky="nw",
+                                                                                  padx=(0, 8))
         self.lbl_concepto_full = ttk.Label(detail, text="—", wraplength=980, justify="left")
         self.lbl_concepto_full.grid(row=0, column=1, sticky="ew")
 
-        ttk.Label(detail, text="Precio unitario:", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(6, 0), padx=(0, 8))
+        ttk.Label(detail, text="Precio unitario:", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(6, 0),
+                                                                              padx=(0, 8))
         self.lbl_precio_full = ttk.Label(detail, text="—", font=("Segoe UI", 11, "bold"))
         self.lbl_precio_full.grid(row=1, column=1, sticky="w", pady=(6, 0))
 
@@ -225,7 +239,6 @@ class PanelConceptos(ttk.Frame):
             pass
 
     def on_theme_changed(self):
-        # tags del tree + scrollbars
         try:
             self._apply_tree_tags_theme()
         except Exception:
@@ -274,6 +287,7 @@ class PanelConceptos(ttk.Frame):
             iid = f"c{idx}"
 
             cantidad = getattr(c, "cantidad", "")
+            tipo_ps = self._infer_ps(c)  # <-- Calculamos P o S
             clv_unid = getattr(c, "clave_unidad", "") or ""
             clv_prod = getattr(c, "clave_prod_serv", "") or ""
             concepto = getattr(c, "concepto", "") or ""
@@ -283,6 +297,7 @@ class PanelConceptos(ttk.Frame):
 
             values = (
                 cantidad,
+                tipo_ps,  # <-- Inyectamos a la tabla
                 clv_unid,
                 self.catalogs.unid_name(clv_unid),
                 clv_prod,
@@ -411,7 +426,7 @@ class PanelConceptos(ttk.Frame):
             if region != "cell":
                 return
 
-            col = self.tree.identify_column(event.x)  # "#1", "#2", ...
+            col = self.tree.identify_column(event.x)
             row_id = self.tree.identify_row(event.y)
             if not row_id:
                 return
@@ -430,6 +445,21 @@ class PanelConceptos(ttk.Frame):
             col_id = disp[idx]
             if col_id in ("unid_nombre", "prod_nombre"):
                 return
+
+            # --- NUEVA LÓGICA DE TOGGLE PARA P/S ---
+            if col_id == "tipo_ps":
+                concepto_obj = self._tree_item_to_concepto.get(str(row_id))
+                if concepto_obj:
+                    curr = self._infer_ps(concepto_obj)
+                    nuevo_valor = "P" if curr == "S" else "S"
+                    concepto_obj.tipo_ps = nuevo_valor
+                    self._refresh_tree_row_from_model(row_id, concepto_obj)
+                    try:
+                        self._mark_saved(f"Cambiado a {'Producto' if nuevo_valor == 'P' else 'Servicio'}")
+                    except Exception:
+                        pass
+                return
+            # ---------------------------------------
 
             self._prompt_edit_cell(str(row_id), str(col_id))
         except Exception:
@@ -554,6 +584,7 @@ class PanelConceptos(ttk.Frame):
 
     def _refresh_tree_row_from_model(self, row_id: str, c: Concepto):
         cantidad = getattr(c, "cantidad", "")
+        tipo_ps = self._infer_ps(c)  # <-- Refrescar el valor actual
         clv_unid = getattr(c, "clave_unidad", "") or ""
         clv_prod = getattr(c, "clave_prod_serv", "") or ""
         concepto = getattr(c, "concepto", "") or ""
@@ -563,6 +594,7 @@ class PanelConceptos(ttk.Frame):
 
         vals = (
             cantidad,
+            tipo_ps,
             clv_unid,
             self.catalogs.unid_name(clv_unid),
             clv_prod,
@@ -581,15 +613,13 @@ class PanelConceptos(ttk.Frame):
         if not f:
             return
 
-        # En lugar de sumar matemáticamente los conceptos (lo cual solo daría el subtotal),
-        # respetamos y mostramos el Total real que el parser inteligente ya encontró.
         total = float(getattr(f, "total", 0.0) or 0.0)
 
         try:
-            # Agregué el signo de $ para que se vea más estético
             self.lbl_total.config(text=f"TOTAL: ${total:,.2f}")
         except Exception:
             pass
+
     # -------------- Context menu (copy/cut/paste/dup/del/search) --------------
     def _build_tree_context_menu(self):
         if self._tree_ctx_menu is not None:
@@ -657,7 +687,7 @@ class PanelConceptos(ttk.Frame):
 
     def _clone_concepto(self, c: Concepto) -> Concepto:
         try:
-            return Concepto(
+            cc = Concepto(
                 cantidad=getattr(c, "cantidad", 1.0),
                 clave_unidad=getattr(c, "clave_unidad", "") or "",
                 clave_prod_serv=getattr(c, "clave_prod_serv", "") or "",
@@ -665,11 +695,17 @@ class PanelConceptos(ttk.Frame):
                 precio_unitario=getattr(c, "precio_unitario", 0.0) or 0.0,
                 importe=getattr(c, "importe", None),
             )
+            # Copiar también el tipo_ps si existe
+            if hasattr(c, "tipo_ps"):
+                cc.tipo_ps = c.tipo_ps
+            return cc
         except Exception:
             cc = Concepto()
-            for k in ("cantidad", "clave_unidad", "clave_prod_serv", "concepto", "precio_unitario", "importe"):
+            for k in ("cantidad", "clave_unidad", "clave_prod_serv", "concepto", "precio_unitario", "importe",
+                      "tipo_ps"):
                 try:
-                    setattr(cc, k, getattr(c, k))
+                    if hasattr(c, k):
+                        setattr(cc, k, getattr(c, k))
                 except Exception:
                     pass
             return cc

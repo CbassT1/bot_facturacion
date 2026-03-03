@@ -390,6 +390,7 @@ class VisorFacturasFrame(ttk.Frame):
                 "clave_prod_serv": getattr(c, "clave_prod_serv", ""),
                 "descripcion": getattr(c, "descripcion", ""),
                 "precio_unitario": float(getattr(c, "precio_unitario", getattr(c, "valor_unitario", 0)) or 0),
+                "tipo_ps": getattr(c, "tipo_ps", self.panel_conceptos._infer_ps(c)),
             })
 
         db = SessionLocal()
