@@ -195,8 +195,36 @@ class PendientesFrame(ttk.Frame):
         self.refresh_data()
 
     def _editar_factura(self):
-        messagebox.showinfo("Editar",
-                            "Esta función regresará el estado de la factura a 'En revisión' en el visor en una próxima actualización.")
+        sel = self.tree.selection()
+        if not sel: return
+        factura_id = int(sel[0])
+
+        # 1. RASTREADOR: Busca la pantalla del Visor sin importar cómo se llame la llave
+        visor_frame = None
+        visor_key = None
+        for key, frame in self.controller.frames.items():
+            if type(frame).__name__ == "VisorFacturasFrame":
+                visor_frame = frame
+                visor_key = key
+                break
+
+        # 2. Si la encontró, inyectamos los datos
+        if visor_frame:
+            try:
+                # Cargamos la info de la base de datos
+                visor_frame.cargar_edicion_bd(factura_id)
+                # Viajamos a esa pantalla
+                self.controller.show(visor_key)
+            except Exception as e:
+                # Si algo choca internamente, que nos avise con una ventana roja en lugar de quedarse callado
+                from tkinter import messagebox
+                import traceback
+                error_trace = traceback.format_exc()
+                print(error_trace)  # Lo mandamos a la consola por si acaso
+                messagebox.showerror("Error de Edición", f"Chocó al intentar cargar los datos:\n{str(e)}")
+        else:
+            from tkinter import messagebox
+            messagebox.showerror("Error Crítico", "No se encontró la pantalla del Visor en la memoria.")
 
     def _iniciar_bot(self):
         # 1. Buscar qué facturas están pendientes

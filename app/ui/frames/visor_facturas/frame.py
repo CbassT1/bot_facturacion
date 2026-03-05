@@ -14,7 +14,7 @@ from tkinter import ttk, messagebox
 from app.database.database import SessionLocal, FacturaGuardada, ProveedorCredencial, encrypt_password
 
 # --- modelos ---
-from app.models import Factura
+from app.models import Factura, Cliente, DatosFactura, Concepto
 
 # --- app core ---
 from typing import TYPE_CHECKING
@@ -49,6 +49,9 @@ class VisorFacturasFrame(ttk.Frame):
         self._accordion_active: str = "conceptos"
         self._is_duplicate: bool = False
 
+        # NUEVO: Rastreador para saber si estamos editando una factura que ya estaba en BD
+        self._current_db_id = None
+
         self.catalogs = Catalogs()
         self.catalogs.load()
 
@@ -63,7 +66,6 @@ class VisorFacturasFrame(ttk.Frame):
         ttk.Button(header, text="☰", command=self._toggle_left_panel, width=3).pack(side="left")
         ttk.Button(header, text="← Volver", command=self._back).pack(side="left", padx=(8, 0))
 
-        # === NUEVO BOTÓN: ACCESO RÁPIDO A PENDIENTES ===
         ttk.Button(header, text="Ir a Pendientes ➔", command=lambda: self.controller.show("pendientes")).pack(
             side="left", padx=(8, 0))
 
@@ -283,6 +285,9 @@ class VisorFacturasFrame(ttk.Frame):
         if hasattr(self, "btn_del_sheet"): self.btn_del_sheet.state(["!disabled"] if has else ["disabled"])
 
     def _clear_view(self):
+        # Limpiamos el ID de la base de datos para no mezclar ediciones
+        self._current_db_id = None
+
         try:
             if hasattr(self, "panel_sheets") and self.panel_sheets: self.panel_sheets.clear()
             if hasattr(self, "panel_datos") and self.panel_datos: self.panel_datos.clear()
@@ -339,9 +344,14 @@ class VisorFacturasFrame(ttk.Frame):
         try:
             existe = db.query(FacturaGuardada).filter_by(archivo_origen=archivo, hoja_origen=hoja).first()
             if existe:
-                self._is_duplicate = True
-                pal = get_pal(self.controller)
-                self.lbl_warn.configure(text=f"⚠️ Ya en fila ({existe.estado})", foreground=pal["WARN"])
+                # Si estamos editando esa misma factura, ignoramos la advertencia de duplicidad
+                if self._current_db_id and self._current_db_id == existe.id:
+                    self._is_duplicate = False
+                    self.lbl_warn.configure(text="✏️ Editando Factura", foreground="#1976D2")
+                else:
+                    self._is_duplicate = True
+                    pal = get_pal(self.controller)
+                    self.lbl_warn.configure(text=f"⚠️ Ya en fila ({existe.estado})", foreground=pal["WARN"])
             else:
                 self._is_duplicate = False
                 self.lbl_warn.configure(text="")
@@ -369,6 +379,74 @@ class VisorFacturasFrame(ttk.Frame):
         return getattr(fact, "archivo_origen", None) or "SIN_ARCHIVO"
 
     # ========================================================
+    # LÓGICA DE EDICIÓN INVERSA (De BD a Memoria)
+    # ========================================================
+    def cargar_edicion_bd(self, factura_id: int):
+        """Reconstruye la factura desde la BD hacia el Visor."""
+        db = SessionLocal()
+        try:
+            fact_db = db.query(FacturaGuardada).get(factura_id)
+            if not fact_db: return
+
+            self._current_db_id = fact_db.id
+
+            # 1. Preparamos el Cliente ANTES de crear la factura
+            c_obj = Cliente()
+            c_obj.proveedor = fact_db.proveedor
+            c_obj.rfc = fact_db.rfc_cliente
+
+            # 2. Preparamos los DatosFactura ANTES de crear la factura
+            df_obj = DatosFactura()
+            df_obj.uso_cfdi = fact_db.uso_cfdi
+            df_obj.metodo_pago = fact_db.metodo_pago
+            df_obj.forma_pago = fact_db.forma_pago
+            df_obj.usd = fact_db.es_usd
+            df_obj.tipo_cambio = fact_db.tipo_cambio
+            df_obj.sucursal = fact_db.sucursal
+            df_obj.emitir_y_enviar = fact_db.emitir_y_enviar
+            df_obj.info_extra = fact_db.notas_extra
+
+            # 3. ¡EL FIX! Creamos la Factura entregándole sus datos obligatorios
+            f = Factura(
+                id=str(fact_db.id),
+                cliente=c_obj,
+                datos_factura=df_obj
+            )
+            # Y ahora sí le ponemos el resto
+            f.archivo_origen = fact_db.archivo_origen
+            f.hoja_origen = fact_db.hoja_origen
+            f.total = fact_db.total
+
+            # 4. Reconstruir Conceptos desde el JSON
+            f.conceptos = []
+            if fact_db.conceptos_json:
+                conceptos_dict = json.loads(fact_db.conceptos_json)
+                for cd in conceptos_dict:
+                    # ¡EL FIX! Le damos al Concepto lo que exige desde que nace
+                    c = Concepto(
+                        cantidad=cd.get("cantidad"),
+                        clave_unidad=cd.get("clave_unidad"),
+                        clave_prod_serv=cd.get("clave_prod_serv"),
+                        concepto=cd.get("descripcion"),  # Recuerda que mapeamos descripcion -> concepto
+                        precio_unitario=cd.get("precio_unitario")
+                    )
+                    # Y le agregamos los datos opcionales/extra después
+                    c.unidad = cd.get("unidad")
+                    c.tipo_ps = cd.get("tipo_ps")
+
+                    f.conceptos.append(c)
+
+            # 5. Inyectar en la Interfaz Gráfica
+            self._toggle_left_panel(force_collapse=True)
+            self._set_factura(f)
+
+            self.controller.set_status(f"Editando factura ID: {fact_db.id} ({fact_db.proveedor})",
+                                       auto_clear_ms=4000)
+
+        finally:
+            db.close()
+
+    # ========================================================
     # LÓGICA DE BASE DE DATOS Y APROBACIÓN
     # ========================================================
     def _aprobar_factura(self):
@@ -380,7 +458,6 @@ class VisorFacturasFrame(ttk.Frame):
             messagebox.showwarning("Faltan datos", "El RFC es obligatorio para aprobar la factura.")
             return
 
-        # Extracción segura de conceptos (Arreglo getattr)
         conceptos_list = []
         for c in fact.conceptos:
             conceptos_list.append({
@@ -388,46 +465,73 @@ class VisorFacturasFrame(ttk.Frame):
                 "clave_unidad": getattr(c, "clave_unidad", ""),
                 "unidad": getattr(c, "unidad", getattr(c, "unidad_medida", "")),
                 "clave_prod_serv": getattr(c, "clave_prod_serv", ""),
-                "descripcion": getattr(c, "descripcion", ""),
+                "descripcion": getattr(c, "concepto", getattr(c, "descripcion", "")),
                 "precio_unitario": float(getattr(c, "precio_unitario", getattr(c, "valor_unitario", 0)) or 0),
                 "tipo_ps": getattr(c, "tipo_ps", self.panel_conceptos._infer_ps(c)),
             })
 
         db = SessionLocal()
         try:
-            # --- CAPTURAMOS LO QUE HAY EN LA PANTALLA ---
+            # Capturamos interfaz
             metodo_sel = self.panel_datos.var_metodo.get()
             forma_sel = self.panel_datos.var_forma.get()
             uso_sel = self.panel_datos.var_uso.get()
             usd_activo = self.panel_datos.var_usd.get()
             sucursal_sel = self.panel_datos.var_sucursal.get()
-
-            # ¡AQUÍ ESTÁ LA CORRECCIÓN! Usamos var_fx en lugar de var_tipo_cambio
+            emitir_sel = self.panel_datos.var_emitir_enviar.get()
             tc_valor = self.panel_datos.var_fx.get()
+            notas_extra = self.panel_datos.txt_extra.get("1.0", "end-1c")
 
             prov_name = (getattr(fact.cliente, "proveedor", "") or "").strip()
 
-            nueva_factura = FacturaGuardada(
-                archivo_origen=getattr(fact, "archivo_origen", "SIN_ARCHIVO"),
-                hoja_origen=getattr(fact, "hoja_origen", ""),
-                rfc_cliente=rfc,
-                proveedor=prov_name,
-                metodo_pago=metodo_sel,
-                forma_pago=forma_sel,
-                uso_cfdi=uso_sel,
-                es_usd=bool(usd_activo),
-                tipo_cambio=str(tc_valor) if tc_valor else None,
-                sucursal=sucursal_sel,
-                total=float(getattr(fact, "total", 0.0) or 0.0),
-                notas_extra=self.panel_datos.txt_extra.get("1.0", "end-1c"),
-                estado="Pendiente",
-                conceptos_json=json.dumps(conceptos_list, ensure_ascii=False)
-            )
+            if getattr(self, "_current_db_id", None):
+                # ACTUALIZAR REGISTRO EXISTENTE
+                fact_update = db.query(FacturaGuardada).get(self._current_db_id)
+                if fact_update:
+                    fact_update.rfc_cliente = rfc
+                    fact_update.proveedor = prov_name
+                    fact_update.metodo_pago = metodo_sel
+                    fact_update.forma_pago = forma_sel
+                    fact_update.uso_cfdi = uso_sel
+                    fact_update.es_usd = bool(usd_activo)
+                    fact_update.tipo_cambio = str(tc_valor) if tc_valor else None
+                    fact_update.sucursal = sucursal_sel
+                    fact_update.emitir_y_enviar = bool(emitir_sel)
+                    fact_update.notas_extra = notas_extra
+                    fact_update.total = float(getattr(fact, "total", 0.0) or 0.0)
+                    fact_update.estado = "Pendiente"  # Lo devolvemos a pendiente por si estaba en error
+                    fact_update.conceptos_json = json.dumps(conceptos_list, ensure_ascii=False)
 
-            db.add(nueva_factura)
-            db.commit()
-            self.controller.set_status("¡Factura enviada a la fila con tus cambios!", auto_clear_ms=3000)
-            self._remover_factura_memoria(fact)
+                    db.commit()
+                    self.controller.set_status(f"Factura ID {self._current_db_id} actualizada correctamente.",
+                                               auto_clear_ms=3000)
+
+                    self._clear_view()
+                    self.controller.show("pendientes")  # Mandamos de vuelta al menú de pendientes
+            else:
+                # CREAR NUEVO REGISTRO
+                nueva_factura = FacturaGuardada(
+                    archivo_origen=getattr(fact, "archivo_origen", "SIN_ARCHIVO"),
+                    hoja_origen=getattr(fact, "hoja_origen", ""),
+                    rfc_cliente=rfc,
+                    proveedor=prov_name,
+                    metodo_pago=metodo_sel,
+                    forma_pago=forma_sel,
+                    uso_cfdi=uso_sel,
+                    es_usd=bool(usd_activo),
+                    tipo_cambio=str(tc_valor) if tc_valor else None,
+                    sucursal=sucursal_sel,
+                    emitir_y_enviar=bool(emitir_sel),
+                    total=float(getattr(fact, "total", 0.0) or 0.0),
+                    notas_extra=notas_extra,
+                    estado="Pendiente",
+                    conceptos_json=json.dumps(conceptos_list, ensure_ascii=False)
+                )
+
+                db.add(nueva_factura)
+                db.commit()
+                self.controller.set_status("Factura aprobada y guardada en pendientes.", auto_clear_ms=3000)
+                self._remover_factura_memoria(fact)
 
         except Exception as e:
             db.rollback()

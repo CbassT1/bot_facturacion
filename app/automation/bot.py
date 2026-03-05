@@ -6,10 +6,7 @@ from app.database.database import SessionLocal, FacturaGuardada, ProveedorCreden
 
 
 def ejecutar_bot(factura_ids: list[int], log_callback):
-    """
-    Inicia Playwright y procesa la lista de facturas pendientes.
-    log_callback se usa para enviar mensajes de texto a la interfaz gráfica.
-    """
+
     log_callback("Iniciando motor de Playwright...")
     db = SessionLocal()
 
@@ -77,13 +74,9 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     caja_rfc.press("Enter")
                     page.wait_for_timeout(4000)  # Esperamos a que el sistema procese el RFC
 
-                    # --- PASO 2.5: SUCURSAL (Solo XISISA y VIESA) ---
-                    if "XISISA" in nombre_prov or "VIESA" in nombre_prov:
-                        sucursal_bd = getattr(factura, "sucursal", "MONTERREY")
-                        if not sucursal_bd: sucursal_bd = "MONTERREY"
-                        sucursal_bd = sucursal_bd.upper()
-
-                        log_callback(f"Configurando sucursal {sucursal_bd} para {nombre_prov}...")
+                    # --- PASO 2.5: LUGAR DE EXPEDICIÓN (Xisisa, Viesa, Reklamsa, Marto) ---
+                    if any(p in nombre_prov for p in ["XISISA", "VIESA", "REKLAMSA", "MARTO"]):
+                        log_callback(f"Configurando lugar de expedición para {nombre_prov}...")
 
                         caja_lugar = page.locator("div").filter(
                             has_text=re.compile(r"^Lugar de Expedición", re.IGNORECASE)).locator(".selectinput").first
@@ -91,16 +84,26 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                         page.wait_for_timeout(500)
 
                         if "XISISA" in nombre_prov:
-                            texto_suc = "- Matriz" if sucursal_bd == "MONTERREY" else "- Guadalajara"
-                        else:  # VIESA
-                            texto_suc = "- MONTERREY" if sucursal_bd == "MONTERREY" else "- GUADALAJARA"
+                            sucursal_bd = getattr(factura, "sucursal", "MONTERREY") or "MONTERREY"
+                            texto_suc = "- Matriz" if sucursal_bd.upper() == "MONTERREY" else "- Guadalajara"
+                        elif "VIESA" in nombre_prov:
+                            sucursal_bd = getattr(factura, "sucursal", "MONTERREY") or "MONTERREY"
+                            texto_suc = "- MONTERREY" if sucursal_bd.upper() == "MONTERREY" else "- GUADALAJARA"
+                        elif "REKLAMSA" in nombre_prov:
+                            texto_suc = "64940 - Monterrey"
+                        else:  # MARTO
+                            texto_suc = "- MONTERREY"
 
                         page.get_by_role("listitem").filter(has_text=texto_suc).click()
                         page.wait_for_timeout(1000)
 
                     # --- PASO 3: Uso de CFDI ---
                     log_callback("Seleccionando Uso de CFDI...")
-                    page.get_by_text("Selecciona una opción").nth(1).click()
+                    caja_uso_cfdi = page.locator("div").filter(
+                        has_text=re.compile(r"^Uso de CFDI", re.IGNORECASE)).locator(".selectinput").first
+                    caja_uso_cfdi.click(force=True)
+                    page.wait_for_timeout(500)
+
                     caja_busqueda_cfdi = page.get_by_role("textbox", name="Escribe para buscar...")
                     caja_busqueda_cfdi.click()
 
@@ -116,18 +119,44 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     razon_social = caja_razon.input_value().strip()
 
                     if not razon_social:
-                        log_callback("⚠️ ALERTA: Razón Social vacía. Cliente NO registrado.")
-                        log_callback("El bot se pausará. Realiza el alta manual del cliente en la ventana...")
-                        log_callback("Al terminar el alta, dale a 'Resume' (Play) en el inspector para continuar.")
-                        page.pause()
-                        # Damos un respiro después de quitar la pausa por si la página hace recargas
-                        page.wait_for_timeout(2000)
+                        log_callback("⚠️ ALERTA: Cliente NO registrado.")
+                        log_callback("Inyectando botón de pausa en el navegador...")
 
-                    # --- PASO 4: Tipo de Comprobante ---
+                        page.evaluate("""
+                            window.botContinuar = false;
+                            let btn = document.createElement('button');
+                            btn.innerHTML = '▶ TERMINÉ EL ALTA - CONTINUAR BOT';
+                            btn.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:20px 40px; font-size:22px; font-weight:bold; background-color:#E53935; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);';
+                            btn.onclick = function() {
+                                window.botContinuar = true;
+                                this.innerHTML = 'Continuando...';
+                                this.style.backgroundColor = '#43A047';
+                            };
+                            document.body.appendChild(btn);
+                        """)
+
+                        page.wait_for_function("window.botContinuar === true", timeout=0)
+                        log_callback("Bot reanudado. Continuando con la factura...")
+                        page.wait_for_timeout(3000)
+
+                        # --- PASO 4: Tipo de Comprobante ---
                     log_callback("Seleccionando Tipo de Comprobante...")
-                    page.get_by_text("Selecciona una opción").nth(5).click()
+                    caja_comprobante = page.locator("div").filter(
+                        has_text=re.compile(r"^Tipo de Comprobante", re.IGNORECASE)).locator(".selectinput").first
+                    caja_comprobante.click(force=True)
+                    page.wait_for_timeout(500)
                     page.get_by_role("listitem").filter(has_text="I - Factura").click()
                     page.wait_for_timeout(1500)
+
+                    # --- PASO 4.5: SERIE (Solo Reklamsa) ---
+                    if "REKLAMSA" in nombre_prov:
+                        log_callback("Configurando Serie para REKLAMSA...")
+                        caja_serie = page.locator("div").filter(has_text=re.compile(r"^Serie", re.IGNORECASE)).locator(
+                            ".selectinput").first
+                        caja_serie.click(force=True)
+                        page.wait_for_timeout(500)
+                        page.get_by_role("listitem").filter(has_text="Sin Serie").click()
+                        page.wait_for_timeout(1000)
 
                     # --- PASO 5: Moneda y Tipo de Cambio ---
                     es_usd_valor = str(getattr(factura, "es_usd", "")).strip().lower()
@@ -198,7 +227,6 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     notas = getattr(factura, "notas_extra", "") or ""
                     if notas.strip():
                         log_callback("Agregando Información Extra...")
-                        # Botón con force=True para ignorar el icono que estorba
                         btn_info = page.locator("text=Información Extra").first
                         btn_info.click(force=True)
                         page.wait_for_timeout(1000)
@@ -232,16 +260,24 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                         caja_ps.type(texto_ps, delay=150)
                         page.wait_for_timeout(2000)
                         caja_ps.press("Enter")
-                        page.wait_for_timeout(1000)
+
+                        # --- EL ANTÍDOTO CONTRA EL ROBO DE FOCO ---
+                        log_callback("Esperando a que Angular asigne el foco automático...")
+                        page.wait_for_timeout(3500)  # Dejamos que el SAT mueva el foco a Cantidad si quiere
 
                         # --- 2. Clave de Producto / Servicio ---
                         clave_sat = str(concepto.get("clave_prod_serv", ""))
                         caja_clave_sat = page.get_by_role("textbox", name="Busca en el catálogo del SAT").first
+
+                        # Le robamos el foco de vuelta explícitamente
                         caja_clave_sat.click(force=True)
+                        caja_clave_sat.focus()
+                        page.wait_for_timeout(500)
+
                         caja_clave_sat.press("Control+A")
                         caja_clave_sat.press("Backspace")
                         caja_clave_sat.type(clave_sat, delay=150)
-                        page.wait_for_timeout(2500)
+                        page.wait_for_timeout(3500)
                         caja_clave_sat.press("Enter")
                         page.wait_for_timeout(1000)
 
@@ -256,19 +292,14 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
 
                         # --- 4. Unidad de Medida (FRANCOTIRADOR) ---
                         clave_unidad = str(concepto.get("clave_unidad", ""))
-
-                        # Usamos ^ para indicarle que el texto DEBE empezar con "Unidad de medida"
-                        # y agarramos el primero (.first) para evitar la tabla de abajo.
                         caja_unidad = page.locator("div").filter(
                             has_text=re.compile(r"^Unidad de medida", re.IGNORECASE)).locator(".selectinput").first
-
                         caja_unidad.click(force=True)
                         page.wait_for_timeout(500)
 
                         caja_buscar_unid = page.get_by_role("textbox", name="Escribe para buscar...")
                         caja_buscar_unid.click()
                         caja_buscar_unid.type(clave_unidad, delay=150)
-
                         page.wait_for_timeout(2500)
                         caja_buscar_unid.press("Enter")
                         page.wait_for_timeout(1000)
@@ -294,24 +325,119 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                         btn_agregar = page.get_by_role("button", name="Agregar Concepto", exact=True)
                         btn_agregar.click()
 
-                        # Espera inteligente antes de iniciar la inyección del siguiente concepto
                         page.wait_for_timeout(3000)
 
                     # ======================================================
                     # TERMINA EL CICLO DE CONCEPTOS
                     # ======================================================
-                    log_callback("¡Todos los conceptos fueron inyectados!")
-                    page.pause()  # Pausa final para que revises
+                    log_callback("¡Todos los conceptos inyectados! Verificando totales...")
+                    page.wait_for_timeout(3000)  # Dar tiempo a que Angular sume todo
+
+                    # --- VERIFICACIÓN DE TOTALES ---
+                    def obtener_total_web():
+                        try:
+                            fila_total = page.locator("tr").filter(
+                                has=page.get_by_role("cell", name="Total", exact=True)).first
+                            texto_total = fila_total.locator("td").last.inner_text()
+                            texto_limpio = re.sub(r"[^\d.]", "", texto_total)
+                            return float(texto_limpio)
+                        except Exception:
+                            return 0.0
+
+                    total_web = obtener_total_web()
+                    total_db = float(getattr(factura, "total", 0.0) or 0.0)
+                    margen_error = 1.0
+
+                    if abs(total_web - total_db) > margen_error:
+                        log_callback(f"⚠️ Discrepancia detectada. Web: ${total_web} vs BD: ${total_db}")
+                        log_callback("Intentando forzar recálculo de impuestos (Truco del engranaje)...")
+
+                        try:
+                            page.locator(".btn").first.click(force=True)
+                            page.wait_for_timeout(1000)
+                            page.get_by_text("Editar").click(force=True)
+                            page.wait_for_timeout(2500)
+                            page.get_by_role("button", name="Guardar Concepto").click(force=True)
+                            page.wait_for_timeout(4000)
+                            total_web = obtener_total_web()
+                        except Exception as e:
+                            log_callback(f"No se pudo hacer el recálculo automático: {e}")
+
+                        if abs(total_web - total_db) > margen_error:
+                            log_callback(f"❌ El total sigue sin cuadrar (Web: ${total_web} vs BD: ${total_db}).")
+                            log_callback("Bot pausado. Revisa la factura a mano, ajusta y dale a 'Resume'.")
+                            page.pause()
+                            total_web = obtener_total_web()
+
+                    # ======================================================
+                    # FIX: Esta sección ya está alineada correctamente afuera del IF
+                    # ======================================================
+                    # --- GENERAR Y ENVIAR (CONDICIONAL) ---
+                    debe_emitir = getattr(factura, "emitir_y_enviar", False)
+
+                    if debe_emitir:
+                        log_callback("✅ Totales cuadrados. Emitiendo factura...")
+                        page.get_by_role("button", name="Generar").click(force=True)
+
+                        log_callback("Esperando la firma del SAT y cambio de página (Esto puede tardar)...")
+                        page.wait_for_url(re.compile(r"/comprobante/detalle/"), timeout=45000)
+                        page.wait_for_timeout(2000)
+
+                        log_callback("¡Factura timbrada! Abriendo menú de envío...")
+                        btn_enviar_menu = page.get_by_role("button", name="Enviar por correo Enviar por")
+                        btn_enviar_menu.wait_for(state="visible", timeout=10000)
+                        btn_enviar_menu.click(force=True)
+                        page.wait_for_timeout(1500)
+
+                        log_callback("Confirmando envío del correo...")
+                        btn_confirmar_correo = page.get_by_role("button", name="Enviar Correo")
+                        btn_confirmar_correo.click(force=True)
+
+                        log_callback("✅ Correo enviado con éxito.")
+                        page.wait_for_timeout(3000)
+
+                        factura.estado = "Emitida"
+                        db.commit()
+                        log_callback(f"🎉 Factura {f_id} completada y marcada como Emitida.")
+
+                    else:
+                        log_callback("⏸️ Casilla 'Emitir' apagada. La factura se quedó en borrador.")
+                        log_callback("El bot te esperará. Emite manualmente o presiona el botón azul para seguir.")
+                        factura.estado = "Completada (Borrador)"
+                        db.commit()
+
+                        try:
+                            page.evaluate("""                       
+                                                    window.botBorrador = false;                       
+                                                    let btn = document.createElement('button');
+                                                    btn.innerHTML = '▶ CONTINUAR BOT (SIGUIENTE FACTURA)';
+                                                    btn.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:20px 40px; font-size:22px; font-weight:bold; background-color:#1976D2; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);';
+                                                    btn.onclick = function() {
+                                                        window.botBorrador = true;
+                                                        this.innerHTML = 'Continuando...';
+                                                        this.style.backgroundColor = '#43A047';
+                                                    };
+                                                    document.body.appendChild(btn);
+                                                """)
+
+                            page.wait_for_function("window.botBorrador === true", timeout=0)
+                            log_callback("Botón presionado. Avanzando a la siguiente...")
+
+                        except Exception:
+                            log_callback("Se detectó emisión manual (Cambio de página). Avanzando...")
+                            pass
+
+                        page.wait_for_timeout(1000)
 
                 except Exception as ex_interna:
                     log_callback(f"Error procesando la factura {f_id}: {str(ex_interna)}")
                     log_callback("El bot se pausará para revisar el error.")
                     page.pause()
 
-            browser.close()
-            log_callback("Lote completado. Navegador cerrado.")
+                browser.close()
+                log_callback("Lote completado. Navegador cerrado.")
 
     except Exception as e:
-        log_callback(f"Error crítico en el motor: {str(e)}")
+                log_callback(f"Error crítico en el motor: {str(e)}")
     finally:
         db.close()

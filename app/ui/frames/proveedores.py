@@ -1,7 +1,7 @@
 # app/ui/frames/proveedores.py
+import json
 import tkinter as tk
-from tkinter import ttk, messagebox
-# IMPORTANTE: Agregamos decrypt_password a las importaciones
+from tkinter import ttk, messagebox, filedialog
 from app.database.database import SessionLocal, ProveedorCredencial, encrypt_password, decrypt_password
 from app.ui.theme import get_pal
 
@@ -96,6 +96,14 @@ class ProveedoresFrame(ttk.Frame):
         self.tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
 
+        # --- Botones de Exportar/Importar ---
+        table_actions_frame = ttk.Frame(self)
+        table_actions_frame.pack(fill="x", padx=12, pady=(0, 12))
+
+        ttk.Button(table_actions_frame, text="Exportar JSON", command=self._exportar_json).pack(side="left",
+                                                                                                  padx=(0, 10))
+        ttk.Button(table_actions_frame, text="Importar JSON", command=self._importar_json).pack(side="left")
+
         # --- Menú Contextual ---
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(label="Cargar para Editar", command=self._cargar_edicion)
@@ -119,7 +127,6 @@ class ProveedoresFrame(ttk.Frame):
         self.var_proveedor.set("")
         self.var_usuario.set("")
         self.var_password.set("")
-        # Asegurarnos de que vuelva a ocultarse al limpiar
         self._pass_visible = False
         self.entry_password.configure(show="*")
         self.btn_show_pass.configure(text="Mostrar")
@@ -143,7 +150,6 @@ class ProveedoresFrame(ttk.Frame):
             db.close()
 
     def _guardar_credencial(self):
-        # El .upper() forza a que el nombre del proveedor siempre se guarde en mayúsculas
         prov = self.var_proveedor.get().strip().upper()
         user = self.var_usuario.get().strip()
         pwd = self.var_password.get().strip()
@@ -160,7 +166,6 @@ class ProveedoresFrame(ttk.Frame):
                 if cred:
                     cred.nombre_proveedor = prov
                     cred.usuario = user
-                    # Como ahora el formulario carga la real, simplemente la volvemos a encriptar
                     cred.password_encriptado = encrypt_password(pwd)
             else:
                 existe = db.query(ProveedorCredencial).filter_by(nombre_proveedor=prov).first()
@@ -204,8 +209,6 @@ class ProveedoresFrame(ttk.Frame):
                 self.var_id.set(str(cred.id))
                 self.var_proveedor.set(cred.nombre_proveedor)
                 self.var_usuario.set(cred.usuario)
-
-                # Desencriptamos la contraseña real y la ponemos en el formulario (saldrá con asteriscos por el 'show="*"')
                 pwd_real = decrypt_password(cred.password_encriptado)
                 self.var_password.set(pwd_real)
         finally:
@@ -227,6 +230,89 @@ class ProveedoresFrame(ttk.Frame):
                 db.close()
             self.refresh_data()
             self._limpiar_formulario()
+
+    # --- LÓGICA DE IMPORTAR / EXPORTAR ---
+    def _exportar_json(self):
+        db = SessionLocal()
+        try:
+            proveedores = db.query(ProveedorCredencial).all()
+            if not proveedores:
+                messagebox.showinfo("Exportar", "No hay proveedores en el catálogo para exportar.")
+                return
+
+            datos = []
+            for p in proveedores:
+                datos.append({
+                    "nombre_proveedor": p.nombre_proveedor,
+                    "usuario": p.usuario,
+                    "password": decrypt_password(p.password_encriptado)
+                })
+
+            ruta = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("Archivos JSON", "*.json")],
+                title="Guardar respaldo de Proveedores"
+            )
+
+            if ruta:
+                with open(ruta, 'w', encoding='utf-8') as f:
+                    json.dump(datos, f, indent=4)
+                messagebox.showinfo("Éxito", f"Se exportaron {len(datos)} proveedores correctamente.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error al exportar: {e}")
+        finally:
+            db.close()
+
+    def _importar_json(self):
+        ruta = filedialog.askopenfilename(
+            filetypes=[("Archivos JSON", "*.json")],
+            title="Seleccionar respaldo de Proveedores"
+        )
+        if not ruta:
+            return
+
+        db = SessionLocal()
+        try:
+            with open(ruta, 'r', encoding='utf-8') as f:
+                datos = json.load(f)
+
+            agregados = 0
+            actualizados = 0
+
+            for d in datos:
+                nombre = d.get("nombre_proveedor")
+                usuario = d.get("usuario")
+                password = d.get("password")
+
+                if not nombre or not usuario or not password:
+                    continue
+
+                # Normalizamos a mayúsculas
+                nombre = nombre.strip().upper()
+
+                prov_existente = db.query(ProveedorCredencial).filter_by(nombre_proveedor=nombre).first()
+                if prov_existente:
+                    prov_existente.usuario = usuario
+                    prov_existente.password_encriptado = encrypt_password(password)
+                    actualizados += 1
+                else:
+                    nuevo_prov = ProveedorCredencial(
+                        nombre_proveedor=nombre,
+                        usuario=usuario,
+                        password_encriptado=encrypt_password(password)
+                    )
+                    db.add(nuevo_prov)
+                    agregados += 1
+
+            db.commit()
+            messagebox.showinfo("Éxito",
+                                f"Importación completa.\n\nAgregados: {agregados}\nActualizados: {actualizados}")
+            self.refresh_data()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error al importar: {e}")
+        finally:
+            db.close()
 
     # --- LÓGICA DEL TEMA ---
     def _toggle_theme(self):

@@ -69,6 +69,7 @@ class FacturaGuardada(Base):
     es_usd = Column(Boolean, default=False)
     tipo_cambio = Column(String(20), nullable=True)
     sucursal = Column(String(100), nullable=True)
+    emitir_y_enviar = Column(Boolean, default=False)
 
     total = Column(Float, nullable=True)
     notas_extra = Column(Text, nullable=True)
@@ -93,3 +94,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# =========================================================
+# LA LÍNEA MÁGICA: Construye las tablas si no existen
+# =========================================================
+Base.metadata.create_all(bind=engine)
