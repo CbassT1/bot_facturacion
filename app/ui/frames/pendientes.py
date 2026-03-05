@@ -82,7 +82,7 @@ class PendientesFrame(ttk.Frame):
         # --- Menú Contextual (Clic Derecho) ---
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(label="Editar / Devolver al Visor", command=self._editar_factura)
-        self.menu.add_command(label="Alternar Modo (Auto/Manual)", command=self._alternar_modo)
+        self.menu.add_command(label="Alternar Modo (Auto/Manual)", command=self._cambiar_modo_ejecucion)
         self.menu.add_separator()
         self.menu.add_command(label="Eliminar seleccionadas", command=self._eliminar_factura)
 
@@ -100,9 +100,8 @@ class PendientesFrame(ttk.Frame):
             pendientes_count = 0
 
             for index, f in enumerate(facturas):
-                modo = "Automático" if f.es_automatica else "Manual"
-                estado_display = f.estado
-
+                # FIX: Usamos "emitir_y_enviar" en lugar de "es_automatica"
+                modo_texto = "Automático" if getattr(f, "emitir_y_enviar", False) else "Manual"
                 tag = "even" if index % 2 == 0 else "odd"
 
                 if f.estado == "Pendiente":
@@ -110,15 +109,16 @@ class PendientesFrame(ttk.Frame):
                     if f.total:
                         total_dinero += f.total
 
+                # FIX: Aseguramos que se inserten exactamente las 8 columnas para que no se desfase
                 self.tree.insert("", "end", iid=str(f.id), values=(
                     f.id,
-                    f.archivo_origen,
-                    f.hoja_origen or "-",
-                    f.proveedor,
-                    f.rfc_cliente,
+                    getattr(f, "archivo_origen", "SIN ARCHIVO") or "SIN ARCHIVO",
+                    getattr(f, "hoja_origen", "-") or "-",
+                    getattr(f, "proveedor", ""),
+                    getattr(f, "rfc_cliente", ""),
                     f"${f.total:,.2f}" if f.total else "$0.00",
-                    modo,
-                    estado_display
+                    modo_texto,
+                    f.estado
                 ), tags=(tag,))
 
             pal = get_pal(self.controller)
@@ -126,7 +126,23 @@ class PendientesFrame(ttk.Frame):
                 text=f"Facturas en espera: {pendientes_count}   |   Suma total a procesar: ${total_dinero:,.2f}",
                 foreground=pal["ACCENT"]
             )
+        finally:
+            db.close()
 
+    def _cambiar_modo_ejecucion(self):
+        sel = self.tree.selection()
+        if not sel: return
+
+        db = SessionLocal()
+        try:
+            for item in sel:
+                fact_id = int(item)
+                fact = db.query(FacturaGuardada).get(fact_id)
+                if fact:
+                    # Invertimos el valor (Si es True pasa a False, y viceversa)
+                    fact.emitir_y_enviar = not fact.emitir_y_enviar
+            db.commit()
+            self.refresh_data()  # Recargamos la tabla para ver el cambio visual
         finally:
             db.close()
 
@@ -187,7 +203,8 @@ class PendientesFrame(ttk.Frame):
             for item_id in sel:
                 f = db.query(FacturaGuardada).get(int(item_id))
                 if f:
-                    f.es_automatica = not f.es_automatica
+                    # FIX: Invertimos la variable correcta
+                    f.emitir_y_enviar = not getattr(f, "emitir_y_enviar", False)
             db.commit()
         finally:
             db.close()

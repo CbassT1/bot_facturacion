@@ -401,31 +401,40 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                         log_callback(f"🎉 Factura {f_id} completada y marcada como Emitida.")
 
                     else:
+
                         log_callback("⏸️ Casilla 'Emitir' apagada. La factura se quedó en borrador.")
                         log_callback("El bot te esperará. Emite manualmente o presiona el botón azul para seguir.")
                         factura.estado = "Completada (Borrador)"
+
                         db.commit()
 
                         try:
-                            page.evaluate("""                       
-                                                    window.botBorrador = false;                       
-                                                    let btn = document.createElement('button');
-                                                    btn.innerHTML = '▶ CONTINUAR BOT (SIGUIENTE FACTURA)';
-                                                    btn.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:20px 40px; font-size:22px; font-weight:bold; background-color:#1976D2; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);';
-                                                    btn.onclick = function() {
-                                                        window.botBorrador = true;
-                                                        this.innerHTML = 'Continuando...';
-                                                        this.style.backgroundColor = '#43A047';
-                                                    };
-                                                    document.body.appendChild(btn);
-                                                """)
 
-                            page.wait_for_function("window.botBorrador === true", timeout=0)
+                            # Inyectamos el botón azul flotante con un ID inicial
+
+                            page.evaluate("""
+                                            let btn = document.createElement('button');
+                                            btn.id = 'btn-espera-bot';
+                                            btn.innerHTML = '▶ CONTINUAR BOT (SIGUIENTE FACTURA)';
+                                            btn.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:20px 40px; font-size:22px; font-weight:bold; background-color:#1976D2; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);';
+                                            btn.onclick = function() {
+                                            this.id = 'btn-continuar-bot'; // Al darle clic, le cambiamos el ID
+                                            this.innerHTML = 'Continuando...';
+                                            this.style.backgroundColor = '#43A047';
+                                            };
+                                                document.body.appendChild(btn);
+                                            """)
+
+                            # Playwright se quedará congelado aquí buscando el nuevo ID por tiempo infinito (timeout=0)
+                            page.wait_for_selector("#btn-continuar-bot", state="attached", timeout=0)
                             log_callback("Botón presionado. Avanzando a la siguiente...")
 
-                        except Exception:
-                            log_callback("Se detectó emisión manual (Cambio de página). Avanzando...")
-                            pass
+                        except Exception as e_espera:
+
+                            # Si tú le das a "Generar" a mano, la página cambia y el botón se destruye.
+                            # Playwright detecta que la página cambió y lanza un error.
+                            # Lo atrapamos aquí para que asuma que emitiste manualmente y avance.
+                            log_callback(f"Pausa terminada (Emisión manual o interrupción). Avanzando...")
 
                         page.wait_for_timeout(1000)
 
@@ -434,10 +443,25 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     log_callback("El bot se pausará para revisar el error.")
                     page.pause()
 
-                browser.close()
-                log_callback("Lote completado. Navegador cerrado.")
+            # ======================================================
+            # FIN DEL CICLO FOR (Aquí termina de revisar todas las facturas)
+            # ======================================================
+
+            log_callback("=======================================")
+            log_callback("Lote completado. El navegador permanecerá abierto.")
+            log_callback("Ciérralo tú mismo (con la X) cuando hayas terminado todo.")
+
+            try:
+                # Playwright se queda esperando infinitamente a que cierres la ventana
+                page.wait_for_event("close", timeout=0)
+            except Exception:
+                pass
+
+            browser.close()
+            log_callback("Navegador cerrado. Motor apagado.")
 
     except Exception as e:
-                log_callback(f"Error crítico en el motor: {str(e)}")
+        log_callback(f"Error crítico en el motor: {str(e)}")
+
     finally:
         db.close()
