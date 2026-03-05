@@ -453,91 +453,105 @@ class VisorFacturasFrame(ttk.Frame):
         fact = self._factura_sel
         if not fact: return
 
-        rfc = getattr(fact.cliente, "rfc", "").strip()
-        if not rfc:
-            messagebox.showwarning("Faltan datos", "El RFC es obligatorio para aprobar la factura.")
-            return
-
-        conceptos_list = []
-        for c in fact.conceptos:
-            conceptos_list.append({
-                "cantidad": float(getattr(c, "cantidad", 0) or 0),
-                "clave_unidad": getattr(c, "clave_unidad", ""),
-                "unidad": getattr(c, "unidad", getattr(c, "unidad_medida", "")),
-                "clave_prod_serv": getattr(c, "clave_prod_serv", ""),
-                "descripcion": getattr(c, "concepto", getattr(c, "descripcion", "")),
-                "precio_unitario": float(getattr(c, "precio_unitario", getattr(c, "valor_unitario", 0)) or 0),
-                "tipo_ps": getattr(c, "tipo_ps", self.panel_conceptos._infer_ps(c)),
-            })
-
-        db = SessionLocal()
         try:
-            # Capturamos interfaz
-            metodo_sel = self.panel_datos.var_metodo.get()
-            forma_sel = self.panel_datos.var_forma.get()
-            uso_sel = self.panel_datos.var_uso.get()
-            usd_activo = self.panel_datos.var_usd.get()
-            sucursal_sel = self.panel_datos.var_sucursal.get()
-            emitir_sel = self.panel_datos.var_emitir_enviar.get()
-            tc_valor = self.panel_datos.var_fx.get()
-            notas_extra = self.panel_datos.txt_extra.get("1.0", "end-1c")
+            # 1. Extracción súper segura del cliente
+            cli = getattr(fact, "cliente", None)
+            rfc = (getattr(cli, "rfc", "") or "").strip() if cli else ""
 
-            prov_name = (getattr(fact.cliente, "proveedor", "") or "").strip()
+            if not rfc:
+                messagebox.showwarning("Faltan datos", "El RFC es obligatorio para aprobar la factura.")
+                return
 
-            if getattr(self, "_current_db_id", None):
-                # ACTUALIZAR REGISTRO EXISTENTE
-                fact_update = db.query(FacturaGuardada).get(self._current_db_id)
-                if fact_update:
-                    fact_update.rfc_cliente = rfc
-                    fact_update.proveedor = prov_name
-                    fact_update.metodo_pago = metodo_sel
-                    fact_update.forma_pago = forma_sel
-                    fact_update.uso_cfdi = uso_sel
-                    fact_update.es_usd = bool(usd_activo)
-                    fact_update.tipo_cambio = str(tc_valor) if tc_valor else None
-                    fact_update.sucursal = sucursal_sel
-                    fact_update.emitir_y_enviar = bool(emitir_sel)
-                    fact_update.notas_extra = notas_extra
-                    fact_update.total = float(getattr(fact, "total", 0.0) or 0.0)
-                    fact_update.estado = "Pendiente"  # Lo devolvemos a pendiente por si estaba en error
-                    fact_update.conceptos_json = json.dumps(conceptos_list, ensure_ascii=False)
+            # 2. Extracción segura de conceptos
+            conceptos_list = []
+            for c in fact.conceptos:
+                conceptos_list.append({
+                    "cantidad": float(getattr(c, "cantidad", 0) or 0),
+                    "clave_unidad": getattr(c, "clave_unidad", ""),
+                    "unidad": getattr(c, "unidad", getattr(c, "unidad_medida", "")),
+                    "clave_prod_serv": getattr(c, "clave_prod_serv", ""),
+                    "descripcion": getattr(c, "concepto", getattr(c, "descripcion", "")),
+                    "precio_unitario": float(getattr(c, "precio_unitario", getattr(c, "valor_unitario", 0)) or 0),
+                    "tipo_ps": getattr(c, "tipo_ps", self.panel_conceptos._infer_ps(c)),
+                })
 
+            # 3. Guardado en Base de Datos
+            db = SessionLocal()
+            try:
+                # Capturamos interfaz
+                metodo_sel = self.panel_datos.var_metodo.get()
+                forma_sel = self.panel_datos.var_forma.get()
+                uso_sel = self.panel_datos.var_uso.get()
+                usd_activo = self.panel_datos.var_usd.get()
+                sucursal_sel = self.panel_datos.var_sucursal.get()
+                emitir_sel = self.panel_datos.var_emitir_enviar.get()
+                tc_valor = self.panel_datos.var_fx.get()
+                notas_extra = self.panel_datos.txt_extra.get("1.0", "end-1c")
+
+                prov_name = (getattr(cli, "proveedor", "") or "").strip() if cli else ""
+
+                if getattr(self, "_current_db_id", None):
+                    # ACTUALIZAR REGISTRO EXISTENTE
+                    fact_update = db.query(FacturaGuardada).get(self._current_db_id)
+                    if fact_update:
+                        fact_update.rfc_cliente = rfc
+                        fact_update.proveedor = prov_name
+                        fact_update.metodo_pago = metodo_sel
+                        fact_update.forma_pago = forma_sel
+                        fact_update.uso_cfdi = uso_sel
+                        fact_update.es_usd = bool(usd_activo)
+                        fact_update.tipo_cambio = str(tc_valor) if tc_valor else None
+                        fact_update.sucursal = sucursal_sel
+                        fact_update.emitir_y_enviar = bool(emitir_sel)
+                        fact_update.notas_extra = notas_extra
+                        fact_update.total = float(getattr(fact, "total", 0.0) or 0.0)
+                        fact_update.estado = "Pendiente"
+                        fact_update.conceptos_json = json.dumps(conceptos_list, ensure_ascii=False)
+
+                        db.commit()
+                        self.controller.set_status(f"Factura ID {self._current_db_id} actualizada correctamente.",
+                                                   auto_clear_ms=3000)
+
+                        self._clear_view()
+                        self.controller.show("pendientes")
+                else:
+                    # CREAR NUEVO REGISTRO
+                    nueva_factura = FacturaGuardada(
+                        archivo_origen=getattr(fact, "archivo_origen", "SIN_ARCHIVO"),
+                        hoja_origen=getattr(fact, "hoja_origen", ""),
+                        rfc_cliente=rfc,
+                        proveedor=prov_name,
+                        metodo_pago=metodo_sel,
+                        forma_pago=forma_sel,
+                        uso_cfdi=uso_sel,
+                        es_usd=bool(usd_activo),
+                        tipo_cambio=str(tc_valor) if tc_valor else None,
+                        sucursal=sucursal_sel,
+                        emitir_y_enviar=bool(emitir_sel),
+                        total=float(getattr(fact, "total", 0.0) or 0.0),
+                        notas_extra=notas_extra,
+                        estado="Pendiente",
+                        conceptos_json=json.dumps(conceptos_list, ensure_ascii=False)
+                    )
+
+                    db.add(nueva_factura)
                     db.commit()
-                    self.controller.set_status(f"Factura ID {self._current_db_id} actualizada correctamente.",
-                                               auto_clear_ms=3000)
+                    self.controller.set_status("Factura aprobada y guardada en pendientes.", auto_clear_ms=3000)
+                    self._remover_factura_memoria(fact)
 
-                    self._clear_view()
-                    self.controller.show("pendientes")  # Mandamos de vuelta al menú de pendientes
-            else:
-                # CREAR NUEVO REGISTRO
-                nueva_factura = FacturaGuardada(
-                    archivo_origen=getattr(fact, "archivo_origen", "SIN_ARCHIVO"),
-                    hoja_origen=getattr(fact, "hoja_origen", ""),
-                    rfc_cliente=rfc,
-                    proveedor=prov_name,
-                    metodo_pago=metodo_sel,
-                    forma_pago=forma_sel,
-                    uso_cfdi=uso_sel,
-                    es_usd=bool(usd_activo),
-                    tipo_cambio=str(tc_valor) if tc_valor else None,
-                    sucursal=sucursal_sel,
-                    emitir_y_enviar=bool(emitir_sel),
-                    total=float(getattr(fact, "total", 0.0) or 0.0),
-                    notas_extra=notas_extra,
-                    estado="Pendiente",
-                    conceptos_json=json.dumps(conceptos_list, ensure_ascii=False)
-                )
+            except Exception as e:
+                db.rollback()
+                messagebox.showerror("Error de BD", f"No se pudo guardar en la base de datos:\n{e}")
+            finally:
+                db.close()
 
-                db.add(nueva_factura)
-                db.commit()
-                self.controller.set_status("Factura aprobada y guardada en pendientes.", auto_clear_ms=3000)
-                self._remover_factura_memoria(fact)
-
-        except Exception as e:
-            db.rollback()
-            messagebox.showerror("Error de BD", f"No se pudo guardar la factura:\n{e}")
-        finally:
-            db.close()
+        except Exception as ex_general:
+            # ¡EL RASTREADOR DE ERRORES! Si algo falla en la memoria de Python, lo atrapamos aquí.
+            import traceback
+            error_trace = traceback.format_exc()
+            print(error_trace)  # Lo mandamos a consola
+            messagebox.showerror("Error Crítico de Datos",
+                                 f"El programa chocó antes de guardar. Detalle:\n\n{str(ex_general)}")
 
     def _remover_factura_memoria(self, fact: Factura):
         archivo_key = self._file_key_for_fact(fact)
