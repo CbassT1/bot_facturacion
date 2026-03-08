@@ -6,7 +6,6 @@ from app.database.database import SessionLocal, FacturaGuardada, ProveedorCreden
 
 
 def ejecutar_bot(factura_ids: list[int], log_callback):
-
     log_callback("Iniciando motor de Playwright...")
     db = SessionLocal()
 
@@ -14,11 +13,14 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
         with sync_playwright() as p:
             log_callback("Abriendo navegador Chromium...")
             browser = p.chromium.launch(headless=False, slow_mo=50)
-            context = browser.new_context()
-            page = context.new_page()
+
+            # --- VARIABLES GLOBALES DEL NAVEGADOR ---
+            context = None
+            page = None
+            proveedor_actual = None  # Rastreador de sesión activa
 
             for f_id in factura_ids:
-                # --- ESCUDO ANTIBALAS: Si algo falla aquí adentro, no cierra el navegador ---
+                # --- ESCUDO ANTIBALAS ---
                 try:
                     factura = db.query(FacturaGuardada).get(f_id)
                     if not factura:
@@ -27,30 +29,48 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     nombre_prov = (factura.proveedor or "").strip().upper()
                     log_callback(f"Procesando ID {f_id} del proveedor: {nombre_prov}")
 
-                    # --- LOGIN ---
-                    page.goto("https://auth.facturador.com/partiallogin")
+                    # ======================================================
+                    # CONTROL DE SESIÓN SÚPER INTELIGENTE
+                    # ======================================================
+                    if nombre_prov != proveedor_actual:
+                        log_callback(f"Iniciando sesión limpia para: {nombre_prov}")
 
-                    cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=nombre_prov).first()
-                    if not cred or not cred.usuario:
-                        log_callback(f"Advertencia: Sin credenciales para {nombre_prov}. Saltando...")
-                        page.wait_for_timeout(3000)
-                        continue
+                        # Si ya había una sesión de otro proveedor, la destruimos
+                        if context:
+                            context.close()
 
-                    pwd = decrypt_password(cred.password_encriptado)
+                        # Creamos una sesión "incógnito" nueva
+                        context = browser.new_context()
+                        page = context.new_page()
 
-                    log_callback("Iniciando sesión...")
-                    caja_usuario = page.get_by_role("textbox", name="Usuario")
-                    caja_usuario.wait_for(state="visible", timeout=15000)
-                    caja_usuario.fill(cred.usuario)
-                    page.get_by_role("button", name="Siguiente").click()
+                        # --- LOGIN ---
+                        page.goto("https://auth.facturador.com/partiallogin")
 
-                    caja_password = page.get_by_role("textbox", name="Contraseña")
-                    caja_password.wait_for(state="visible", timeout=10000)
-                    caja_password.fill(pwd)
-                    page.get_by_role("button", name="Iniciar").click()
+                        cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=nombre_prov).first()
+                        if not cred or not cred.usuario:
+                            log_callback(f"Advertencia: Sin credenciales para {nombre_prov}. Saltando...")
+                            page.wait_for_timeout(3000)
+                            continue
 
-                    log_callback("Esperando acceso al portal...")
-                    page.wait_for_timeout(5000)
+                        pwd = decrypt_password(cred.password_encriptado)
+
+                        log_callback("Iniciando sesión...")
+                        caja_usuario = page.get_by_role("textbox", name="Usuario")
+                        caja_usuario.wait_for(state="visible", timeout=15000)
+                        caja_usuario.fill(cred.usuario)
+                        page.get_by_role("button", name="Siguiente").click()
+
+                        caja_password = page.get_by_role("textbox", name="Contraseña")
+                        caja_password.wait_for(state="visible", timeout=10000)
+                        caja_password.fill(pwd)
+                        page.get_by_role("button", name="Iniciar").click()
+
+                        log_callback("Esperando acceso al portal...")
+                        page.wait_for_timeout(5000)
+
+                        proveedor_actual = nombre_prov  # Actualizamos nuestra memoria
+                    else:
+                        log_callback(f"Aprovechando sesión activa de {nombre_prov}. Saltando login...")
 
                     # ======================================================
                     # --- AQUÍ COMIENZA EL LLENADO DE LA FACTURA ---
@@ -139,7 +159,7 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                         log_callback("Bot reanudado. Continuando con la factura...")
                         page.wait_for_timeout(3000)
 
-                        # --- PASO 4: Tipo de Comprobante ---
+                    # --- PASO 4: Tipo de Comprobante ---
                     log_callback("Seleccionando Tipo de Comprobante...")
                     caja_comprobante = page.locator("div").filter(
                         has_text=re.compile(r"^Tipo de Comprobante", re.IGNORECASE)).locator(".selectinput").first
@@ -366,13 +386,13 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                         if abs(total_web - total_db) > margen_error:
                             log_callback(f"❌ El total sigue sin cuadrar (Web: ${total_web} vs BD: ${total_db}).")
                             log_callback("Bot pausado. Revisa la factura a mano, ajusta y dale a 'Resume'.")
-                            page.pause()
+                            if page:
+                                page.pause()
                             total_web = obtener_total_web()
 
                     # ======================================================
-                    # FIX: Esta sección ya está alineada correctamente afuera del IF
-                    # ======================================================
                     # --- GENERAR Y ENVIAR (CONDICIONAL) ---
+                    # ======================================================
                     debe_emitir = getattr(factura, "emitir_y_enviar", False)
 
                     if debe_emitir:
@@ -381,7 +401,22 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
 
                         log_callback("Esperando la firma del SAT y cambio de página (Esto puede tardar)...")
                         page.wait_for_url(re.compile(r"/comprobante/detalle/"), timeout=45000)
-                        page.wait_for_timeout(2000)
+                        page.wait_for_timeout(3000)
+
+                        log_callback("Extrayendo Folio Interno...")
+                        try:
+                            # Extraemos todo el texto visible de la pantalla
+                            texto_pantalla = page.locator("body").inner_text()
+                            # Buscamos la palabra Folio, ignoramos saltos de línea/espacios, y atrapamos los números siguientes
+                            match = re.search(r'Folio\s*[:\n]*\s*(\d+)', texto_pantalla, re.IGNORECASE)
+                            if match:
+                                folio_atrapado = match.group(1)
+                                factura.folio_fiscal = folio_atrapado
+                                log_callback(f"¡Folio {folio_atrapado} capturado con éxito!")
+                            else:
+                                log_callback("No se encontró el Folio en la pantalla.")
+                        except Exception as e:
+                            log_callback(f"Error extrayendo folio: {e}")
 
                         log_callback("¡Factura timbrada! Abriendo menú de envío...")
                         btn_enviar_menu = page.get_by_role("button", name="Enviar por correo Enviar por")
@@ -401,39 +436,31 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                         log_callback(f"🎉 Factura {f_id} completada y marcada como Emitida.")
 
                     else:
-
                         log_callback("⏸️ Casilla 'Emitir' apagada. La factura se quedó en borrador.")
                         log_callback("El bot te esperará. Emite manualmente o presiona el botón azul para seguir.")
                         factura.estado = "Completada (Borrador)"
-
                         db.commit()
 
                         try:
-
                             # Inyectamos el botón azul flotante con un ID inicial
-
                             page.evaluate("""
-                                            let btn = document.createElement('button');
-                                            btn.id = 'btn-espera-bot';
-                                            btn.innerHTML = '▶ CONTINUAR BOT (SIGUIENTE FACTURA)';
-                                            btn.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:20px 40px; font-size:22px; font-weight:bold; background-color:#1976D2; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);';
-                                            btn.onclick = function() {
-                                            this.id = 'btn-continuar-bot'; // Al darle clic, le cambiamos el ID
-                                            this.innerHTML = 'Continuando...';
-                                            this.style.backgroundColor = '#43A047';
-                                            };
-                                                document.body.appendChild(btn);
-                                            """)
+                                let btn = document.createElement('button');
+                                btn.id = 'btn-espera-bot';
+                                btn.innerHTML = '▶ CONTINUAR BOT (SIGUIENTE FACTURA)';
+                                btn.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:20px 40px; font-size:22px; font-weight:bold; background-color:#1976D2; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);';
+                                btn.onclick = function() {
+                                    this.id = 'btn-continuar-bot'; // Al darle clic, le cambiamos el ID
+                                    this.innerHTML = 'Continuando...';
+                                    this.style.backgroundColor = '#43A047';
+                                };
+                                document.body.appendChild(btn);
+                            """)
 
-                            # Playwright se quedará congelado aquí buscando el nuevo ID por tiempo infinito (timeout=0)
+                            # Playwright se quedará congelado aquí buscando el nuevo ID por tiempo infinito
                             page.wait_for_selector("#btn-continuar-bot", state="attached", timeout=0)
                             log_callback("Botón presionado. Avanzando a la siguiente...")
 
                         except Exception as e_espera:
-
-                            # Si tú le das a "Generar" a mano, la página cambia y el botón se destruye.
-                            # Playwright detecta que la página cambió y lanza un error.
-                            # Lo atrapamos aquí para que asuma que emitiste manualmente y avance.
                             log_callback(f"Pausa terminada (Emisión manual o interrupción). Avanzando...")
 
                         page.wait_for_timeout(1000)
@@ -441,10 +468,11 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                 except Exception as ex_interna:
                     log_callback(f"Error procesando la factura {f_id}: {str(ex_interna)}")
                     log_callback("El bot se pausará para revisar el error.")
-                    page.pause()
+                    if page:
+                        page.pause()
 
             # ======================================================
-            # FIN DEL CICLO FOR (Aquí termina de revisar todas las facturas)
+            # FIN DEL CICLO FOR
             # ======================================================
 
             log_callback("=======================================")
@@ -453,15 +481,17 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
 
             try:
                 # Playwright se queda esperando infinitamente a que cierres la ventana
-                page.wait_for_event("close", timeout=0)
+                if page:
+                    page.wait_for_event("close", timeout=0)
             except Exception:
                 pass
 
+            if context:
+                context.close()
             browser.close()
             log_callback("Navegador cerrado. Motor apagado.")
 
     except Exception as e:
         log_callback(f"Error crítico en el motor: {str(e)}")
-
     finally:
         db.close()

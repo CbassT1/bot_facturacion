@@ -19,6 +19,8 @@ from app.ui.frames.ajustar_archivos import AjustarArchivosFrame
 from app.ui.frames.visor_facturas import VisorFacturasFrame
 from app.ui.frames.pendientes import PendientesFrame
 from app.ui.frames.proveedores import ProveedoresFrame
+from app.ui.frames.reportes import ReportesFrame
+from app.ui.frames.ajuste_archivos import AjusteArchivosFrame
 
 # Drag & Drop real (requiere que el root sea TkinterDnD.Tk)
 try:
@@ -79,7 +81,7 @@ class App(_BaseTk):
         _auto_tk_scaling(self, scale_boost=1.15)
         _set_default_fonts(self, base_size=12)
 
-        self.title("S.U.S.I.E.")
+        self.title("FactBot2.0")
         self.geometry("1400x820")
         self.minsize(1200, 720)
 
@@ -123,6 +125,8 @@ class App(_BaseTk):
         self.frames["ajustes"] = AjustarArchivosFrame(self.container, controller=self)
         self.frames["visor"] = VisorFacturasFrame(self.container, controller=self, facturas=[])
         self.frames["proveedores"] = ProveedoresFrame(self.container, controller=self)
+        self.frames["reportes"] = ReportesFrame(self.container, controller=self)
+        self.frames["ajustar"] = AjusteArchivosFrame(self.container, controller=self)
 
         # --- NUEVO FRAME DE PENDIENTES ---
         self.frames["pendientes"] = PendientesFrame(self.container, controller=self)

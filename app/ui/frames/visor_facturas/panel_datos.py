@@ -8,7 +8,8 @@ from typing import Callable, Optional
 
 from app.models import Factura, Cliente, DatosFactura
 from app.ui.theme import get_pal
-from app.ui.constants import PROVEEDORES_OPCIONES, USO_CFDI_OPCIONES, FORMA_PAGO_OPCIONES
+from app.ui.constants import USO_CFDI_OPCIONES, FORMA_PAGO_OPCIONES
+from app.database.database import SessionLocal, ProveedorCredencial
 
 
 class PanelDatos(ttk.Frame):
@@ -27,6 +28,32 @@ class PanelDatos(ttk.Frame):
 
         self._build_ui()
 
+    def _cargar_proveedores_bd(self) -> list:
+        db = SessionLocal()
+        try:
+            proveedores = db.query(ProveedorCredencial.nombre_proveedor).all()
+            nombres = [p[0].upper().strip() for p in proveedores if p[0]]
+            nombres = sorted(list(set(nombres)))
+            nombres.append("OTRO")
+            return nombres
+        except Exception:
+            return ["OTRO"]
+        finally:
+            db.close()
+
+    def _cargar_sucursales_por_proveedor(self, nombre_proveedor: str) -> list:
+        if not nombre_proveedor or nombre_proveedor == "OTRO":
+            return []
+
+        db = SessionLocal()
+        try:
+            prov = db.query(ProveedorCredencial).filter_by(nombre_proveedor=nombre_proveedor).first()
+            if prov and prov.sucursales:
+                return sorted([s.nombre for s in prov.sucursales])
+            return []
+        finally:
+            db.close()
+
     def _build_ui(self):
         card = ttk.Frame(self, style="Card.TFrame")
         card.pack(fill="x", padx=0, pady=0)
@@ -35,7 +62,6 @@ class PanelDatos(ttk.Frame):
         inner.pack(fill="x", padx=14, pady=14)
         pal = get_pal(self.controller)
 
-        # Variables
         self.var_manual_user = tk.StringVar(value="")
         self.var_manual_pass = tk.StringVar(value="")
         self.var_usd = tk.BooleanVar(value=False)
@@ -46,12 +72,13 @@ class PanelDatos(ttk.Frame):
         self.var_fx_msg = tk.StringVar(value="")
         self.var_emitir_enviar = tk.BooleanVar(value=False)
 
-        # Fila 0: Proveedor / RFC
         ttk.Label(inner, text="Proveedor", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10),
                                                                       pady=(0, 8))
         self.var_proveedor = tk.StringVar(value="")
-        self.cmb_proveedor = ttk.Combobox(inner, textvariable=self.var_proveedor, values=PROVEEDORES_OPCIONES,
-                                          state="readonly", width=22)
+
+        opciones_bd = self._cargar_proveedores_bd()
+        self.cmb_proveedor = ttk.Combobox(inner, textvariable=self.var_proveedor, values=opciones_bd, state="readonly",
+                                          width=22)
         self.cmb_proveedor.grid(row=0, column=1, sticky="w", pady=(0, 8))
         self.cmb_proveedor.bind("<<ComboboxSelected>>", self._on_proveedor_change)
         self._hook_combobox(self.cmb_proveedor)
@@ -66,7 +93,6 @@ class PanelDatos(ttk.Frame):
         self.lbl_rfc_msg = ttk.Label(inner, textvariable=self.var_rfc_msg, style="Muted.TLabel")
         self.lbl_rfc_msg.grid(row=0, column=4, sticky="w", padx=(10, 0), pady=(0, 8))
 
-        # Fila 1: Uso CFDI / Metodo / Sucursal
         ttk.Label(inner, text="Uso CFDI", style="Muted.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 10),
                                                                      pady=(0, 8))
         self.var_uso = tk.StringVar(value="")
@@ -78,8 +104,7 @@ class PanelDatos(ttk.Frame):
 
         self.var_sucursal = tk.StringVar(value="")
         self.lbl_sucursal = ttk.Label(inner, text="Sucursal", style="Muted.TLabel")
-        self.cmb_sucursal = ttk.Combobox(inner, textvariable=self.var_sucursal, values=("Monterrey", "Guadalajara"),
-                                         state="readonly", width=12)
+        self.cmb_sucursal = ttk.Combobox(inner, textvariable=self.var_sucursal, values=[], state="readonly", width=12)
         self.lbl_sucursal.grid(row=1, column=4, sticky="w", padx=(24, 10), pady=(0, 8))
         self.cmb_sucursal.grid(row=1, column=5, sticky="w", pady=(0, 8))
         self.cmb_sucursal.bind("<<ComboboxSelected>>", self._on_sucursal_change)
@@ -91,7 +116,6 @@ class PanelDatos(ttk.Frame):
         self.method_frame = ttk.Frame(inner, style="CardInner.TFrame")
         self.method_frame.grid(row=1, column=3, sticky="w", pady=(0, 8))
 
-        # AQUI SE APLICA EL ESTILO ILUMINADO Tab/TabSel a PUE y PPD
         btn_pue = ttk.Button(self.method_frame, text="PUE", style="Tab.TButton",
                              command=lambda: self._set_metodo("PUE"))
         btn_ppd = ttk.Button(self.method_frame, text="PPD", style="Tab.TButton",
@@ -100,7 +124,6 @@ class PanelDatos(ttk.Frame):
         btn_ppd.pack(side="left")
         self._method_buttons = {"PUE": btn_pue, "PPD": btn_ppd}
 
-        # Fila 2: Forma de pago
         ttk.Label(inner, text="Forma de pago", style="Muted.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 10),
                                                                           pady=(0, 8))
         self.var_forma = tk.StringVar(value="")
@@ -110,7 +133,6 @@ class PanelDatos(ttk.Frame):
         self.cmb_forma.bind("<<ComboboxSelected>>", self._on_forma_change)
         self._hook_combobox(self.cmb_forma)
 
-        # Fila 3: USD y Tipo de cambio
         self.chk_usd = tk.Checkbutton(
             inner, text="Factura en dólares (USD)", variable=self.var_usd, command=self._update_usd_fields,
             font=("Segoe UI", 10, "bold"), bg=pal["BG"], fg=pal["MUTED"],
@@ -128,7 +150,6 @@ class PanelDatos(ttk.Frame):
         self.lbl_fx_msg = ttk.Label(self.fx_wrap, textvariable=self.var_fx_msg, style="Muted.TLabel")
         self.lbl_fx_msg.pack(side="left", padx=(10, 0))
 
-        # Fila 4: Extra info y Emitir/Enviar
         self.chk_extra = tk.Checkbutton(
             inner, text="Agregar información extra", variable=self.var_extra, command=self._update_extra_fields,
             font=("Segoe UI", 10, "bold"), bg=pal["BG"], fg=pal["MUTED"],
@@ -144,7 +165,6 @@ class PanelDatos(ttk.Frame):
         )
         self.chk_emitir_enviar.grid(row=4, column=3, columnspan=3, sticky="e", padx=(40, 0), pady=(0, 8))
 
-        # Extra info
         self.extra_wrap = ttk.Frame(inner, style="CardInner.TFrame")
         self.extra_wrap.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(0, 8))
         ttk.Label(self.extra_wrap, text="Notas", style="Muted.TLabel").pack(anchor="w")
@@ -153,7 +173,6 @@ class PanelDatos(ttk.Frame):
         self.txt_extra.pack(fill="x", expand=True, pady=(6, 0))
         self.txt_extra.bind("<FocusOut>", lambda _e: self._mark_saved("Notas actualizadas"))
 
-        # Manual wrap
         self.manual_wrap = ttk.Frame(inner, style="CardInner.TFrame")
         self.manual_wrap.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         ttk.Label(self.manual_wrap, text="Usuario", style="Muted.TLabel").grid(row=1, column=0, sticky="w",
@@ -177,6 +196,7 @@ class PanelDatos(ttk.Frame):
 
         self._refresh_method_styles()
         self._update_provider_manual_fields()
+        self._update_sucursal_visibility()
         self._update_usd_fields()
         self._update_extra_fields()
         self._apply_text_theme()
@@ -255,6 +275,19 @@ class PanelDatos(ttk.Frame):
         self.var_metodo.set(metodo)
         self._refresh_method_styles()
         self._on_metodo_change()
+
+        # --- FORZAR 99 CUANDO SE HACE CLIC EN PPD ---
+        if metodo == "PPD":
+            forma_99 = "99 - Por definir"
+            # Buscamos en las opciones constantes la que tenga el 99
+            for opt in FORMA_PAGO_OPCIONES:
+                if "99" in str(opt):
+                    forma_99 = opt
+                    break
+            self.var_forma.set(forma_99)
+            self._on_forma_change()  # Avisa al modelo BD del cambio
+        # --------------------------------------------
+
         self._mark_saved("Método actualizado")
 
     # ====== VALIDACIONES ======
@@ -275,7 +308,8 @@ class PanelDatos(ttk.Frame):
             if ch.isdigit():
                 out.append(ch)
             elif ch == "." and not dot_used:
-                out.append(ch); dot_used = True
+                out.append(ch);
+                dot_used = True
         return "".join(out)
 
     def _fx_format_ok(self, s: str) -> bool:
@@ -307,15 +341,22 @@ class PanelDatos(ttk.Frame):
         self._refresh_toggle_colors()
 
     def _update_sucursal_visibility(self):
-        prov = (self.var_proveedor.get() or "").strip().lower()
-        if prov in ("xisisa", "viesa"):
+        prov = (self.var_proveedor.get() or "").strip().upper()
+        sucs = self._cargar_sucursales_por_proveedor(prov)
+
+        if sucs:
             self.lbl_sucursal.grid()
             self.cmb_sucursal.grid()
-            if not (self.var_sucursal.get() or "").strip(): self.var_sucursal.set("Monterrey")
+            self.cmb_sucursal['values'] = sucs
+
+            current_suc = (self.var_sucursal.get() or "").strip().upper()
+            if current_suc not in [s.upper() for s in sucs]:
+                self.var_sucursal.set(sucs[0])
         else:
             self.lbl_sucursal.grid_remove()
             self.cmb_sucursal.grid_remove()
             self.var_sucursal.set("")
+
             fact = self.get_factura()
             if fact and getattr(fact, "datos_factura", None) is not None:
                 fact.datos_factura.sucursal = None
@@ -386,22 +427,17 @@ class PanelDatos(ttk.Frame):
     def _on_fx_change(self, _evt=None):
         if not self.var_usd.get():
             return
-
         val = (self.var_fx.get() or "").strip()
         ok = self._fx_format_ok(val)
-
         if ok:
             try:
                 self.ent_fx.configure(style="TEntry")
             except Exception:
                 pass
-
-            # Actualizamos el modelo
             fact = self.get_factura()
             if fact:
                 self._ensure_datos(fact)
                 fact.datos_factura.tipo_cambio = val
-
             self._mark_saved("Tipo de cambio actualizado")
         else:
             try:
@@ -417,6 +453,9 @@ class PanelDatos(ttk.Frame):
         if not fact: return
         self._ensure_cliente(fact)
         fact.cliente.proveedor = self.var_proveedor.get().strip()
+
+        self._ensure_datos(fact)
+        fact.datos_factura.sucursal = (self.var_sucursal.get() or "").strip() or None
         self._mark_saved("Proveedor actualizado")
 
     def _on_uso_change(self, _evt=None):
@@ -456,14 +495,35 @@ class PanelDatos(ttk.Frame):
 
     # ====== CARGA Y LIMPIEZA ======
     def cargar_datos(self, fact: Factura):
+        self.cmb_proveedor['values'] = self._cargar_proveedores_bd()
+
         cli = getattr(fact, "cliente", None)
         dat = getattr(fact, "datos_factura", None)
 
         self.var_proveedor.set((getattr(cli, "proveedor", "") or "").strip())
         self.var_rfc.set((getattr(cli, "rfc", "") or "").strip())
         self.var_uso.set((getattr(dat, "uso_cfdi", "") or "").strip())
-        self.var_metodo.set((getattr(dat, "metodo_pago", "PUE") or "PUE").strip() or "PUE")
-        self.var_forma.set((getattr(dat, "forma_pago", "") or "").strip())
+
+        metodo_cargado = (getattr(dat, "metodo_pago", "PUE") or "PUE").strip() or "PUE"
+        self.var_metodo.set(metodo_cargado)
+        self._refresh_method_styles()
+
+        forma_cargada = (getattr(dat, "forma_pago", "") or "").strip()
+
+        # --- FORZAR 99 AL CARGAR SI ES PPD ---
+        if metodo_cargado == "PPD":
+            forma_99 = "99 - Por definir"
+            for opt in FORMA_PAGO_OPCIONES:
+                if "99" in str(opt):
+                    forma_99 = opt
+                    break
+            forma_cargada = forma_99
+            # Sobrescribir en el modelo para curarnos en salud si el Excel venía mal
+            if dat:
+                dat.forma_pago = forma_cargada
+        # -------------------------------------
+
+        self.var_forma.set(forma_cargada)
 
         try:
             self.var_sucursal.set((getattr(dat, "sucursal", "") or "").strip())
@@ -535,4 +595,3 @@ class PanelDatos(ttk.Frame):
         self._update_extra_fields()
         self._on_rfc_live()
         self._on_fx_live()
-

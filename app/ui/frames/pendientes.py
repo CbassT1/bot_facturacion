@@ -6,6 +6,7 @@ from app.ui.theme import get_pal
 import threading
 from app.automation.bot import ejecutar_bot
 
+
 class PendientesFrame(ttk.Frame):
     def __init__(self, master, controller):
         super().__init__(master)
@@ -19,183 +20,253 @@ class PendientesFrame(ttk.Frame):
         header = ttk.Frame(self)
         header.pack(fill="x", padx=12, pady=(12, 6))
 
-        ttk.Button(header, text="Menú Principal", command=lambda: self.controller.show("menu")).pack(side="left",
-                                                                                                     padx=(8, 0))
+        ttk.Button(header, text="← Menú Principal", command=lambda: self.controller.show("menu")).pack(side="left",
+                                                                                                       padx=(8, 0))
+        ttk.Label(header, text="Centro de Emisión y Registros", font=("Segoe UI", 16, "bold")).pack(side="left",
+                                                                                                    padx=(12, 0))
 
-        ttk.Label(header, text="Fila de Espera (Centro de Emisión)", font=("Segoe UI", 16, "bold")).pack(side="left",
-                                                                                                         padx=(12, 0))
-
-        self.btn_iniciar = ttk.Button(header, text="Iniciar Bot (Playwright)", style="Primary.TButton",
-                                      command=self._iniciar_bot)
+        self.btn_iniciar = ttk.Button(header, text="▶ Iniciar Bot", style="Primary.TButton", command=self._iniciar_bot)
         self.btn_iniciar.pack(side="right")
 
-        # NUEVO: Botón para vaciar toda la lista
-        self.btn_limpiar = ttk.Button(header, text="Limpiar Lista", command=self._limpiar_lista)
-        self.btn_limpiar.pack(side="right", padx=(0, 10))
+        # ========================================================
+        # NOTEBOOK (PESTAÑAS)
+        # ========================================================
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=12, pady=(10, 15))
 
-        # --- Barra de Resumen (Dashboard) ---
-        resumen_frame = ttk.Frame(self, style="Card.TFrame")
-        resumen_frame.pack(fill="x", padx=12, pady=(0, 10))
+        # --- PESTAÑA 1: FILA DE TRABAJO ---
+        self.tab_pend = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_pend, text="Fila de Trabajo (Pendientes)")
 
-        inner_res = ttk.Frame(resumen_frame, style="CardInner.TFrame")
-        inner_res.pack(fill="x", padx=14, pady=10)
+        # --- PESTAÑA 2: HISTORIAL ---
+        self.tab_hist = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_hist, text="Historial (Terminadas)")
 
-        self.lbl_resumen = ttk.Label(inner_res, text="Cargando resumen...", font=("Segoe UI", 12, "bold"))
-        self.lbl_resumen.pack(side="left")
+        self._build_tab_pendientes(pal)
+        self._build_tab_historial(pal)
 
-        # --- Contenedor de la Tabla ---
-        self.tree_frame = ttk.Frame(self)
-        self.tree_frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+    # ========================================================
+    # INTERFAZ: FILA DE TRABAJO
+    # ========================================================
+    def _build_tab_pendientes(self, pal):
+        # Barra de herramientas superior
+        toolbar = ttk.Frame(self.tab_pend)
+        toolbar.pack(fill="x", padx=10, pady=(10, 5))
+
+        self.lbl_resumen_pend = ttk.Label(toolbar, text="Cargando resumen...", font=("Segoe UI", 11, "bold"))
+        self.lbl_resumen_pend.pack(side="left")
+
+        ttk.Button(toolbar, text="Limpiar Fila", command=self._limpiar_pendientes).pack(side="right")
+
+        # Tabla
+        self.tree_pend_frame = ttk.Frame(self.tab_pend)
+        self.tree_pend_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         cols = ("id", "archivo", "hoja", "proveedor", "rfc", "total", "modo", "estado")
-        # selectmode="extended" permite arrastrar o usar Shift/Ctrl para multi-selección
-        self.tree = ttk.Treeview(self.tree_frame, columns=cols, show="headings", style="Treeview",
-                                 selectmode="extended")
+        self.tree_pend = ttk.Treeview(self.tree_pend_frame, columns=cols, show="headings", style="Treeview",
+                                      selectmode="extended")
 
-        self.tree.heading("id", text="ID")
-        self.tree.heading("archivo", text="Archivo Origen")
-        self.tree.heading("hoja", text="Hoja")
-        self.tree.heading("proveedor", text="Proveedor")
-        self.tree.heading("rfc", text="RFC Cliente")
-        self.tree.heading("total", text="Total a Emitir")
-        self.tree.heading("modo", text="Modo de Ejecución")
-        self.tree.heading("estado", text="Estado Actual")
+        self.tree_pend.heading("id", text="ID")
+        self.tree_pend.heading("archivo", text="Archivo Origen")
+        self.tree_pend.heading("hoja", text="Hoja")
+        self.tree_pend.heading("proveedor", text="Proveedor")
+        self.tree_pend.heading("rfc", text="RFC Cliente")
+        self.tree_pend.heading("total", text="Total")
+        self.tree_pend.heading("modo", text="Modo")
+        self.tree_pend.heading("estado", text="Estado")
 
-        self.tree.column("id", width=50, anchor="center")
-        self.tree.column("archivo", width=180)
-        self.tree.column("hoja", width=120)
-        self.tree.column("proveedor", width=150)
-        self.tree.column("rfc", width=120, anchor="center")
-        self.tree.column("total", width=100, anchor="e")
-        self.tree.column("modo", width=120, anchor="center")
-        self.tree.column("estado", width=120, anchor="center")
+        self.tree_pend.column("id", width=50, anchor="center")
+        self.tree_pend.column("archivo", width=180)
+        self.tree_pend.column("hoja", width=100)
+        self.tree_pend.column("proveedor", width=150)
+        self.tree_pend.column("rfc", width=120, anchor="center")
+        self.tree_pend.column("total", width=100, anchor="e")
+        self.tree_pend.column("modo", width=100, anchor="center")
+        self.tree_pend.column("estado", width=120, anchor="center")
 
-        self.tree.tag_configure("odd", background=pal["ROW_ALT"])
-        self.tree.tag_configure("even", background=pal["SURFACE"])
+        self.tree_pend.tag_configure("odd", background=pal["ROW_ALT"])
+        self.tree_pend.tag_configure("even", background=pal["SURFACE"])
 
-        self.tree.pack(fill="both", expand=True, side="left")
+        self.tree_pend.pack(fill="both", expand=True, side="left")
 
-        scrollbar = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar = ttk.Scrollbar(self.tree_pend_frame, orient="vertical", command=self.tree_pend.yview)
+        self.tree_pend.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
 
-        # --- Menú Contextual (Clic Derecho) ---
-        self.menu = tk.Menu(self, tearoff=0)
-        self.menu.add_command(label="Editar / Devolver al Visor", command=self._editar_factura)
-        self.menu.add_command(label="Alternar Modo (Auto/Manual)", command=self._cambiar_modo_ejecucion)
-        self.menu.add_separator()
-        self.menu.add_command(label="Eliminar seleccionadas", command=self._eliminar_factura)
+        # Menú Contextual
+        self.menu_pend = tk.Menu(self, tearoff=0)
+        self.menu_pend.add_command(label="Editar / Devolver al Visor", command=self._editar_factura)
+        self.menu_pend.add_command(label="Alternar Modo (Auto/Manual)", command=self._alternar_modo)
+        self.menu_pend.add_separator()
+        self.menu_pend.add_command(label="Eliminar seleccionadas",
+                                   command=lambda: self._eliminar_seleccionadas(self.tree_pend))
 
-        self.tree.bind("<Button-3>", self._show_menu)
-        self.tree.bind("<B1-Motion>", self._on_drag_select)
+        self.tree_pend.bind("<Button-3>", lambda e: self._show_menu(e, self.tree_pend, self.menu_pend))
 
+        def _drag_select_pend(event):
+            item = self.tree_pend.identify_row(event.y)
+            if item:
+                self.tree_pend.selection_add(item)
+
+        self.tree_pend.bind("<B1-Motion>", _drag_select_pend)
+
+    # ========================================================
+    # INTERFAZ: HISTORIAL
+    # ========================================================
+    def _build_tab_historial(self, pal):
+        toolbar = ttk.Frame(self.tab_hist)
+        toolbar.pack(fill="x", padx=10, pady=(10, 5))
+
+        self.lbl_resumen_hist = ttk.Label(toolbar, text="Cargando historial...", font=("Segoe UI", 11, "bold"))
+        self.lbl_resumen_hist.pack(side="left")
+
+        ttk.Button(toolbar, text="Vaciar Historial", command=self._limpiar_historial).pack(side="right")
+
+        self.tree_hist_frame = ttk.Frame(self.tab_hist)
+        self.tree_hist_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        cols = ("id", "archivo", "proveedor", "rfc", "total", "modo", "estado")
+        self.tree_hist = ttk.Treeview(self.tree_hist_frame, columns=cols, show="headings", style="Treeview",
+                                      selectmode="extended")
+
+        self.tree_hist.heading("id", text="ID")
+        self.tree_hist.heading("archivo", text="Archivo Origen")
+        self.tree_hist.heading("proveedor", text="Proveedor")
+        self.tree_hist.heading("rfc", text="RFC Cliente")
+        self.tree_hist.heading("total", text="Total")
+        self.tree_hist.heading("modo", text="Modo (Cómo se ejecutó)")
+        self.tree_hist.heading("estado", text="Resultado")
+
+        self.tree_hist.column("id", width=50, anchor="center")
+        self.tree_hist.column("archivo", width=180)
+        self.tree_hist.column("proveedor", width=150)
+        self.tree_hist.column("rfc", width=120, anchor="center")
+        self.tree_hist.column("total", width=100, anchor="e")
+        self.tree_hist.column("modo", width=150, anchor="center")
+        self.tree_hist.column("estado", width=150, anchor="center")
+
+        self.tree_hist.tag_configure("odd", background=pal["ROW_ALT"])
+        self.tree_hist.tag_configure("even", background=pal["SURFACE"])
+
+        self.tree_hist.pack(fill="both", expand=True, side="left")
+
+        scrollbar = ttk.Scrollbar(self.tree_hist_frame, orient="vertical", command=self.tree_hist.yview)
+        self.tree_hist.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        self.menu_hist = tk.Menu(self, tearoff=0)
+        self.menu_hist.add_command(label="Eliminar del registro",
+                                   command=lambda: self._eliminar_seleccionadas(self.tree_hist))
+
+        self.tree_hist.bind("<Button-3>", lambda e: self._show_menu(e, self.tree_hist, self.menu_hist))
+
+        def _drag_select_hist(event):
+            item = self.tree_hist.identify_row(event.y)
+            if item:
+                self.tree_hist.selection_add(item)
+
+        self.tree_hist.bind("<B1-Motion>", _drag_select_hist)
+
+    # ========================================================
+    # LÓGICA DE DATOS
+    # ========================================================
     def refresh_data(self):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        for item in self.tree_pend.get_children(): self.tree_pend.delete(item)
+        for item in self.tree_hist.get_children(): self.tree_hist.delete(item)
 
         db = SessionLocal()
         try:
             facturas = db.query(FacturaGuardada).all()
-            total_dinero = 0.0
-            pendientes_count = 0
 
-            for index, f in enumerate(facturas):
-                # FIX: Usamos "emitir_y_enviar" en lugar de "es_automatica"
+            p_dinero, p_count = 0.0, 0
+            h_count = 0
+
+            for f in facturas:
                 modo_texto = "Automático" if getattr(f, "emitir_y_enviar", False) else "Manual"
-                tag = "even" if index % 2 == 0 else "odd"
+                estado = f.estado or ""
 
-                if f.estado == "Pendiente":
-                    pendientes_count += 1
-                    if f.total:
-                        total_dinero += f.total
+                # Clasificamos: Si es Emitida o Borrador va al historial. Si no, va a pendientes.
+                es_historial = "Emitida" in estado or "Borrador" in estado
 
-                # FIX: Aseguramos que se inserten exactamente las 8 columnas para que no se desfase
-                self.tree.insert("", "end", iid=str(f.id), values=(
-                    f.id,
-                    getattr(f, "archivo_origen", "SIN ARCHIVO") or "SIN ARCHIVO",
-                    getattr(f, "hoja_origen", "-") or "-",
-                    getattr(f, "proveedor", ""),
-                    getattr(f, "rfc_cliente", ""),
-                    f"${f.total:,.2f}" if f.total else "$0.00",
-                    modo_texto,
-                    f.estado
-                ), tags=(tag,))
+                if es_historial:
+                    tag = "even" if h_count % 2 == 0 else "odd"
+                    self.tree_hist.insert("", "end", iid=str(f.id), values=(
+                        f.id, getattr(f, "archivo_origen", "-"), getattr(f, "proveedor", ""),
+                        getattr(f, "rfc_cliente", ""), f"${f.total:,.2f}" if f.total else "$0.00",
+                        modo_texto, estado
+                    ), tags=(tag,))
+                    h_count += 1
+                else:
+                    tag = "even" if p_count % 2 == 0 else "odd"
+                    self.tree_pend.insert("", "end", iid=str(f.id), values=(
+                        f.id, getattr(f, "archivo_origen", "-"), getattr(f, "hoja_origen", "-"),
+                        getattr(f, "proveedor", ""), getattr(f, "rfc_cliente", ""),
+                        f"${f.total:,.2f}" if f.total else "$0.00", modo_texto, estado
+                    ), tags=(tag,))
+                    p_count += 1
+                    if f.total: p_dinero += f.total
 
             pal = get_pal(self.controller)
-            self.lbl_resumen.configure(
-                text=f"Facturas en espera: {pendientes_count}   |   Suma total a procesar: ${total_dinero:,.2f}",
-                foreground=pal["ACCENT"]
-            )
+            self.lbl_resumen_pend.configure(
+                text=f"En fila: {p_count} facturas   |   Total a procesar: ${p_dinero:,.2f}", foreground=pal["ACCENT"])
+            self.lbl_resumen_hist.configure(text=f"Facturas procesadas históricas: {h_count}", foreground=pal["MUTED"])
+
         finally:
             db.close()
 
-    def _cambiar_modo_ejecucion(self):
-        sel = self.tree.selection()
-        if not sel: return
-
-        db = SessionLocal()
-        try:
-            for item in sel:
-                fact_id = int(item)
-                fact = db.query(FacturaGuardada).get(fact_id)
-                if fact:
-                    # Invertimos el valor (Si es True pasa a False, y viceversa)
-                    fact.emitir_y_enviar = not fact.emitir_y_enviar
-            db.commit()
-            self.refresh_data()  # Recargamos la tabla para ver el cambio visual
-        finally:
-            db.close()
-
-    def _show_menu(self, event):
-        iid = self.tree.identify_row(event.y)
+    # ========================================================
+    # ACCIONES DE MENÚ Y BOTONES
+    # ========================================================
+    def _show_menu(self, event, tree, menu):
+        iid = tree.identify_row(event.y)
         if iid:
-            # Lógica inteligente: Si haces clic derecho en un elemento que NO está seleccionado,
-            # borra la selección actual y selecciona solo ese.
-            # Pero si haces clic derecho en uno de los varios que ya sombreaste, mantiene la selección múltiple.
-            if iid not in self.tree.selection():
-                self.tree.selection_set(iid)
-            self.menu.post(event.x_root, event.y_root)
+            if iid not in tree.selection():
+                tree.selection_set(iid)
+            menu.post(event.x_root, event.y_root)
 
-    def _on_drag_select(self, event):
-        """Permite seleccionar múltiples filas al mantener el clic presionado y arrastrar."""
-        item = self.tree.identify_row(event.y)
-        if item:
-            # Agrega la fila sobre la que pasa el ratón a la selección actual
-            self.tree.selection_add(item)
-
-    def _eliminar_factura(self):
-        sel = self.tree.selection()
+    def _eliminar_seleccionadas(self, tree):
+        sel = tree.selection()
         if not sel: return
 
-        cantidad = len(sel)
-        mensaje = f"¿Estás seguro de eliminar las {cantidad} facturas seleccionadas de la fila?" if cantidad > 1 else "¿Estás seguro de eliminar esta factura de la fila?"
-
-        if messagebox.askyesno("Eliminar", mensaje):
+        if messagebox.askyesno("Eliminar", f"¿Eliminar definitivamente {len(sel)} registro(s) de la base de datos?"):
             db = SessionLocal()
             try:
                 for item_id in sel:
                     f = db.query(FacturaGuardada).get(int(item_id))
-                    if f:
-                        db.delete(f)
+                    if f: db.delete(f)
                 db.commit()
             finally:
                 db.close()
             self.refresh_data()
 
-    def _limpiar_lista(self):
-        # Función maestra para borrar toda la tabla
-        if messagebox.askyesno("Limpiar Lista",
-                               "ADVERTENCIA: ¿Estás seguro de vaciar toda la fila de espera? Esto eliminará todos los registros actuales."):
+    def _limpiar_pendientes(self):
+        if messagebox.askyesno("Limpiar Fila",
+                               "ADVERTENCIA: ¿Vaciar toda la Fila de Trabajo? (El historial no se borrará)."):
             db = SessionLocal()
             try:
-                db.query(FacturaGuardada).delete()
+                # Borramos solo las que no son historial
+                db.query(FacturaGuardada).filter(
+                    FacturaGuardada.estado.not_in(["Emitida", "Completada (Borrador)"])).delete(
+                    synchronize_session=False)
+                db.commit()
+            finally:
+                db.close()
+            self.refresh_data()
+
+    def _limpiar_historial(self):
+        if messagebox.askyesno("Limpiar Historial",
+                               "¿Estás seguro de borrar todo el historial de facturas procesadas?"):
+            db = SessionLocal()
+            try:
+                db.query(FacturaGuardada).filter(
+                    FacturaGuardada.estado.in_(["Emitida", "Completada (Borrador)"])).delete(synchronize_session=False)
                 db.commit()
             finally:
                 db.close()
             self.refresh_data()
 
     def _alternar_modo(self):
-        sel = self.tree.selection()
+        sel = self.tree_pend.selection()
         if not sel: return
 
         db = SessionLocal()
@@ -203,20 +274,17 @@ class PendientesFrame(ttk.Frame):
             for item_id in sel:
                 f = db.query(FacturaGuardada).get(int(item_id))
                 if f:
-                    # FIX: Invertimos la variable correcta
                     f.emitir_y_enviar = not getattr(f, "emitir_y_enviar", False)
             db.commit()
         finally:
             db.close()
-
         self.refresh_data()
 
     def _editar_factura(self):
-        sel = self.tree.selection()
+        sel = self.tree_pend.selection()
         if not sel: return
         factura_id = int(sel[0])
 
-        # 1. RASTREADOR: Busca la pantalla del Visor sin importar cómo se llame la llave
         visor_frame = None
         visor_key = None
         for key, frame in self.controller.frames.items():
@@ -225,58 +293,48 @@ class PendientesFrame(ttk.Frame):
                 visor_key = key
                 break
 
-        # 2. Si la encontró, inyectamos los datos
         if visor_frame:
             try:
-                # Cargamos la info de la base de datos
                 visor_frame.cargar_edicion_bd(factura_id)
-                # Viajamos a esa pantalla
                 self.controller.show(visor_key)
             except Exception as e:
-                # Si algo choca internamente, que nos avise con una ventana roja en lugar de quedarse callado
-                from tkinter import messagebox
                 import traceback
-                error_trace = traceback.format_exc()
-                print(error_trace)  # Lo mandamos a la consola por si acaso
-                messagebox.showerror("Error de Edición", f"Chocó al intentar cargar los datos:\n{str(e)}")
+                print(traceback.format_exc())
+                messagebox.showerror("Error de Edición", f"Chocó al cargar: {str(e)}")
         else:
-            from tkinter import messagebox
-            messagebox.showerror("Error Crítico", "No se encontró la pantalla del Visor en la memoria.")
+            messagebox.showerror("Error", "No se encontró el Visor.")
 
+    # ========================================================
+    # LÓGICA DEL BOT
+    # ========================================================
     def _iniciar_bot(self):
-        # 1. Buscar qué facturas están pendientes
         db = SessionLocal()
         try:
-            pendientes = db.query(FacturaGuardada).filter_by(estado="Pendiente").all()
+            # Solo enviamos al bot las que NO están en el historial
+            pendientes = db.query(FacturaGuardada).filter(
+                FacturaGuardada.estado.not_in(["Emitida", "Completada (Borrador)"])).all()
             ids = [f.id for f in pendientes]
         finally:
             db.close()
 
         if not ids:
-            messagebox.showinfo("Aviso", "No hay facturas pendientes para procesar en la base de datos.")
+            messagebox.showinfo("Aviso", "No hay facturas en la Fila de Trabajo para procesar.")
             return
 
-        # 2. Deshabilitar botón para evitar clics dobles
         self.btn_iniciar.state(["disabled"])
 
-        # 3. Función para que el bot actualice la UI de forma segura
         def _log(mensaje):
-            self.controller.after(0, lambda: self.lbl_resumen.configure(text=f"Bot: {mensaje}"))
+            self.controller.after(0, lambda: self.lbl_resumen_pend.configure(text=f"Bot: {mensaje}"))
 
-        # 4. Función de trabajo en segundo plano
         def _worker():
             import asyncio
-            asyncio.set_event_loop(asyncio.new_event_loop())  # <-- VACUNA PARA PLAYWRIGHT EN WINDOWS
-
+            asyncio.set_event_loop(asyncio.new_event_loop())
             ejecutar_bot(ids, _log)
-            # Al terminar, avisar a la UI que reactive todo
             self.controller.after(0, self._on_bot_finished)
 
-        # 5. Lanzar el hilo
-        hilo_bot = threading.Thread(target=_worker, daemon=True)
-        hilo_bot.start()
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_bot_finished(self):
         self.btn_iniciar.state(["!disabled"])
         self.refresh_data()
-        messagebox.showinfo("Completado", "El bot ha terminado su ejecución y el navegador se cerró.")
+        messagebox.showinfo("Completado", "El bot terminó. Las facturas completadas se movieron al Historial.")

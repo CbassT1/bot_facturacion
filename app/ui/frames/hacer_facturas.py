@@ -18,10 +18,9 @@ from app.ui.theme import get_pal, restyle_listbox
 if TYPE_CHECKING:
     from app.ui.app import App
 
-# Si esto vive en otro lado, impórtalo desde ahí.
-# Si ya lo tienes global en gui.py, muévelo a un módulo config.
 try:
     from tkinterdnd2 import DND_FILES  # type: ignore
+
     _HAS_DND = True
 except Exception:
     DND_FILES = None
@@ -38,7 +37,7 @@ class HacerFacturasFrame(ttk.Frame):
         header.pack(fill="x", padx=16, pady=(16, 10))
 
         ttk.Button(header, text="← Volver", command=lambda: controller.show("menu")).pack(side="left")
-        ttk.Label(header, text="Hacer facturas", font=("Segoe UI", 16, "bold")).pack(side="left", padx=(12, 0))
+        ttk.Label(header, text="Nueva Emisión", font=("Segoe UI", 16, "bold")).pack(side="left", padx=(12, 0))
         ttk.Button(header, text=self.controller.theme_button_label(), command=self._toggle_theme).pack(side="right")
 
         body = ttk.Frame(self)
@@ -48,7 +47,7 @@ class HacerFacturasFrame(ttk.Frame):
         drop.pack(fill="x", pady=(0, 10))
 
         pal = get_pal(self.controller)
-        dnd_text = "Arrastra aquí tus archivos" if _HAS_DND else "Drag&Drop no disponible"
+        dnd_text = "Arrastra aquí tus archivos" if _HAS_DND else "Drag & Drop no disponible"
         self.drop_area = tk.Label(
             drop,
             text=dnd_text,
@@ -88,7 +87,7 @@ class HacerFacturasFrame(ttk.Frame):
         self.listbox.configure(selectmode=tk.EXTENDED, exportselection=False)
         self.listbox.pack(fill="both", expand=True, padx=12, pady=12)
 
-        self._files_clipboard = {"mode": None, "paths": []}  # mode: "copy" | "cut"
+        self._files_clipboard = {"mode": None, "paths": []}
         self._build_ready_files_menu()
 
         self.listbox.bind("<Button-3>", self._on_ready_files_right_click)
@@ -103,6 +102,14 @@ class HacerFacturasFrame(ttk.Frame):
         self.listbox.bind("<Control-v>", lambda _e: (self._ready_paste(), "break"))
         self.listbox.bind("<Control-V>", lambda _e: (self._ready_paste(), "break"))
 
+        # Arrastrar para seleccionar múltiples
+        def _drag_select(event):
+            idx = self.listbox.nearest(event.y)
+            if idx >= 0:
+                self.listbox.selection_set(idx)
+
+        self.listbox.bind("<B1-Motion>", _drag_select)
+
         footer = ttk.Frame(body)
         footer.pack(fill="x", pady=(12, 0))
         ttk.Button(footer, text="Continuar", style="Primary.TButton", command=self._continue).pack(side="right")
@@ -114,8 +121,8 @@ class HacerFacturasFrame(ttk.Frame):
             return
         for w in (self.drop_area, self.listbox):
             try:
-                w.drop_target_register(DND_FILES)  # type: ignore[attr-defined]
-                w.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
+                w.drop_target_register(DND_FILES)
+                w.dnd_bind("<<Drop>>", self._on_drop)
             except Exception:
                 pass
 
@@ -179,20 +186,22 @@ class HacerFacturasFrame(ttk.Frame):
         for p in self._paths:
             self.listbox.insert(tk.END, Path(p).name)
 
+    # --- CORRECCIÓN: Borrado múltiple iterando en reversa ---
     def _ready_remove_selected(self):
         sel = self.listbox.curselection()
         if not sel:
             return
-        idx = int(sel[0])
-        try:
-            removed = self._paths.pop(idx)
-        except Exception:
-            return
+
+        eliminados = 0
+        for idx in reversed(sel):
+            try:
+                self._paths.pop(int(idx))
+                eliminados += 1
+            except Exception:
+                continue
+
         self._refresh_list()
-        try:
-            self.controller.set_status(f"Quitado: {Path(removed).name}", auto_clear_ms=1500)
-        except Exception:
-            pass
+        self.controller.set_status(f"Se eliminaron {eliminados} archivo(s).", auto_clear_ms=1500)
 
     def _continue(self):
         if not self._paths:
@@ -264,6 +273,8 @@ class HacerFacturasFrame(ttk.Frame):
                         parent=self,
                     )
                     return
+
+                self._clear_files()
                 self.controller.open_visor(facturas)
 
             self.controller.after(0, _done)
@@ -274,7 +285,6 @@ class HacerFacturasFrame(ttk.Frame):
         self.controller.toggle_theme()
 
     def on_theme_changed(self):
-        # Botón de tema
         header = self.winfo_children()[0]
         for w in header.winfo_children():
             if isinstance(w, ttk.Button) and w.cget("text") in ("Modo claro", "Modo oscuro"):
@@ -298,7 +308,7 @@ class HacerFacturasFrame(ttk.Frame):
         self._ready_menu.add_command(label="Pegar", command=self._ready_paste)
         self._ready_menu.add_separator()
         self._ready_menu.add_command(label="Duplicar", command=self._ready_duplicate)
-        self._ready_menu.add_command(label="Renombrar archivo…", command=self._ready_rename_on_disk)
+        self._ready_menu.add_command(label="Renombrar archivo...", command=self._ready_rename_on_disk)
         self._ready_menu.add_separator()
         self._ready_menu.add_command(label="Eliminar de la lista", command=self._ready_remove_selected)
 
@@ -321,15 +331,15 @@ class HacerFacturasFrame(ttk.Frame):
                 pass
 
         for lbl in (
-            "Abrir archivo",
-            "Ver ruta",
-            "Copiar nombre",
-            "Copiar ruta",
-            "Cortar",
-            "Copiar",
-            "Duplicar",
-            "Renombrar archivo…",
-            "Eliminar de la lista",
+                "Abrir archivo",
+                "Ver ruta",
+                "Copiar nombre",
+                "Copiar ruta",
+                "Cortar",
+                "Copiar",
+                "Duplicar",
+                "Renombrar archivo...",
+                "Eliminar de la lista",
         ):
             st(lbl, has_sel)
         st("Pegar", can_paste)
@@ -352,6 +362,7 @@ class HacerFacturasFrame(ttk.Frame):
         paths = self._ready_get_selected_paths()
         if not paths:
             return
+        # Abre el primer archivo seleccionado
         open_file_native(paths[0], parent=self)
 
     def _ready_show_path(self):

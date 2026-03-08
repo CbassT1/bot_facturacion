@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import openpyxl
 from pathlib import Path
 from typing import List
+import openpyxl
 
 from app.models import Factura as UIFactura, Cliente, DatosFactura, Concepto
 from parser.legacy_excel_parser import ExcelFacturaParser, load_catalogs
@@ -36,33 +36,24 @@ def parse_excel_files(paths: List[str]) -> List[UIFactura]:
         if ruta.name.startswith("~$"):
             continue
 
-        # --- ESCÁNER PROFUNDO CON OPENPYXL (A PRUEBA DE BALAS) ---
+        # Seguimos usando openpyxl SOLAMENTE para asegurar el total correcto
         totales_por_hoja = {}
         try:
-            # data_only=True asegura que leamos los valores reales y no las fórmulas
             wb = openpyxl.load_workbook(ruta, data_only=True)
             for sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
                 total_encontrado = None
-
-                # Convertimos las filas a una lista para poder leerlas de abajo hacia arriba
                 rows = list(ws.iter_rows(values_only=True))
 
                 for row in reversed(rows):
-                    # Filtramos las celdas que están completamente vacías
                     row_vals = [val for val in row if val is not None and str(val).strip() != ""]
-                    if not row_vals:
-                        continue
+                    if not row_vals: continue
 
-                    # Convertimos la fila a un solo texto en mayúsculas
                     row_str = " ".join(str(v).upper() for v in row_vals)
-
-                    # Si es un subtotal, lo ignoramos y seguimos buscando hacia arriba
-                    if any(bad in row_str for bad in ["SUBTOTAL", "SUB TOTAL", "SUB-TOTAL", "LETRA"]):
+                    if any(bad in row_str for bad in ["SUBTOTAL", "SUB TOTAL", "LETRA"]):
                         continue
 
-                    # Si encontramos la palabra TOTAL, extraemos el último número de esa fila
-                    if "TOTAL" in row_str:
+                    if "TOTAL" in row_str and total_encontrado is None:
                         nums = []
                         for val in row_vals:
                             try:
@@ -70,28 +61,24 @@ def parse_excel_files(paths: List[str]) -> List[UIFactura]:
                                 nums.append(float(clean_val))
                             except ValueError:
                                 pass
-
                         if nums:
                             total_encontrado = nums[-1]
-                            break
 
                 if total_encontrado is not None:
                     totales_por_hoja[sheet_name] = total_encontrado
             wb.close()
-        except Exception as e:
-            print(f"Error escaneando totales en {ruta.name}: {e}")
-        # --------------------------------------------------------
+        except Exception:
+            pass
 
+        # Llamamos al Legacy Parser (ahora operado y curado)
         legacy_facturas = parser.parse_file(ruta)
 
         for lf in legacy_facturas:
             origen_str = getattr(lf.archivo, "name", ruta.name) if lf.archivo else ruta.name
             archivo_origen, hoja_origen = _split_origen(origen_str)
+            proveedor_bd = (lf.proveedor or "").strip()
 
-            cliente = Cliente(
-                rfc=(lf.rfc or None),
-                proveedor=(lf.proveedor or None),
-            )
+            cliente = Cliente(rfc=(lf.rfc or None), proveedor=proveedor_bd)
 
             datos = DatosFactura(
                 uso_cfdi=(lf.uso_cfdi or None),
@@ -99,7 +86,7 @@ def parse_excel_files(paths: List[str]) -> List[UIFactura]:
                 forma_pago=(lf.forma_pago or None),
                 es_usd=bool(getattr(lf, "es_usd", False)),
                 tipo_cambio="",
-                info_extra="",
+                info_extra=getattr(lf, "info_extra", ""),  # ¡Pasamos la nota de la OBRA!
             )
 
             conceptos_ui: List[Concepto] = []
@@ -111,20 +98,18 @@ def parse_excel_files(paths: List[str]) -> List[UIFactura]:
                 conceptos_ui.append(
                     Concepto(
                         cantidad=cantidad,
-                        clave_unidad=str(c.clave_unidad or ""),
-                        clave_prod_serv=str(c.clave_prod_serv or ""),
-                        concepto=str(c.descripcion or ""),
+                        clave_unidad=str(c.clave_unidad or "").strip(),
+                        clave_prod_serv=str(c.clave_prod_serv or "").strip(),
+                        concepto=str(c.descripcion or "").strip(),
                         precio_unitario=precio_unit,
                         importe=importe,
                     )
                 )
 
-            # ASIGNAR EL TOTAL ENCONTRADO POR EL ESCÁNER
             total_inteligente = None
             if hoja_origen and hoja_origen in totales_por_hoja:
                 total_inteligente = totales_por_hoja[hoja_origen]
             elif totales_por_hoja:
-                # Si por alguna razón el nombre de la hoja no coincide, toma el valor más alto encontrado
                 total_inteligente = max(totales_por_hoja.values())
 
             if total_inteligente is not None and total_inteligente > 0:

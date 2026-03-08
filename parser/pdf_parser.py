@@ -15,6 +15,7 @@ from parser.legacy_excel_parser import (
     normalizar_uso_cfdi,
 )
 
+
 # ----------------- Helpers -----------------
 def _to_decimal(s: str) -> Optional[Decimal]:
     if s is None:
@@ -28,8 +29,10 @@ def _to_decimal(s: str) -> Optional[Decimal]:
     except (InvalidOperation, ValueError):
         return None
 
+
 def _clean_spaces(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip()
+
 
 def _extract_pages_pdfplumber(path: str) -> List[List[str]]:
     import pdfplumber  # type: ignore
@@ -46,8 +49,11 @@ def _extract_pages_pdfplumber(path: str) -> List[List[str]]:
             pages.append(lines)
     return pages
 
+
 # Normaliza SOLO montos: "$ 8 3,620.69" -> "$83,620.69"
 _MONEY_TOKEN = re.compile(r"\$?\s*\d[\d\s,]*\.\d{2}")
+
+
 def _normalize_money_tokens(s: str) -> str:
     def repl(m: re.Match) -> str:
         t = m.group(0)
@@ -55,7 +61,9 @@ def _normalize_money_tokens(s: str) -> str:
         t = t.replace("$", "")
         t = re.sub(r"\s+", "", t)
         return ("$" if has_dollar else "") + t
+
     return _MONEY_TOKEN.sub(repl, s or "")
+
 
 # ----------------- Regex de renglones -----------------
 _ROW_RE_A = re.compile(
@@ -103,11 +111,13 @@ _TOTAL_RE = re.compile(r"^\s*TOTAL:\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$", re.IGNORECA
 _SUBTOTAL_RE = re.compile(r"^\s*SUBTOTAL:\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$", re.IGNORECASE)
 _IVA_RE = re.compile(r"^\s*IVA:\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$", re.IGNORECASE)
 
+
 def _looks_like_invoice_page(lines: List[str]) -> bool:
     joined = "\n".join(lines[:180]).upper()
     return ("SUBTOTAL" in joined and "IVA" in joined and "TOTAL" in joined) or (
-        "CANTIDAD" in joined and "CLAVE" in joined and "P.U." in joined
+            "CANTIDAD" in joined and "CLAVE" in joined and "P.U." in joined
     )
+
 
 def _extract_meta(lines: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
     proveedor = rfc = uso_cfdi = metodo_pago = forma_pago = None
@@ -146,12 +156,14 @@ def _extract_meta(lines: List[str]) -> Tuple[Optional[str], Optional[str], Optio
 
     return proveedor, rfc, uso_cfdi, metodo_pago, forma_pago
 
+
 def _fix_clave_unidad(clv_unid: str, unidad_col: Optional[str]) -> str:
     cu = (clv_unid or "").strip().upper()
     unidad = (unidad_col or "").strip().upper() if unidad_col else ""
     if cu == "VJE":
         return unidad if unidad and re.fullmatch(r"[A-Z0-9]{2,6}", unidad) else "E54"
     return cu
+
 
 def _parse_page(lines: List[str], archivo_origen: str, page_no: int) -> Optional[Factura]:
     if not lines or not _looks_like_invoice_page(lines):
@@ -174,6 +186,28 @@ def _parse_page(lines: List[str], archivo_origen: str, page_no: int) -> Optional
             concepto_txt = _clean_spaces(m.group("concepto"))
             pu = _to_decimal(m.group("pu")) or Decimal("0")
             imp = _to_decimal(m.group("importe")) or Decimal("0")
+
+            # --- PARCHE PARA SG VIGA (POR RFC) ---
+            if rfc == "SVI150417ST3":
+                prefijos_sat = [
+                    "CABLES PARA CABLEADO",
+                    "POSTES DE METAL",
+                    "PERFILES",
+                    "DRYWALL (TABLAROCA)",
+                    "LAMINA PANEL PARA TECHO, PANALES PARA TECHO",
+                    "LAMINA PANEL PARA TECHO"
+                ]
+                prefijos_sat.sort(key=len, reverse=True)
+
+                up_concepto = concepto_txt.upper()
+                for pref in prefijos_sat:
+                    if up_concepto.startswith(pref):
+                        concepto_txt = concepto_txt[len(pref):].strip()
+                        if concepto_txt.startswith(","):
+                            concepto_txt = concepto_txt[1:].strip()
+                        break
+            # -------------------------------------
+
             conceptos.append(
                 Concepto(
                     cantidad=float(cant),
@@ -195,6 +229,44 @@ def _parse_page(lines: List[str], archivo_origen: str, page_no: int) -> Optional
             concepto_txt = _clean_spaces(m.group("concepto"))
             pu = _to_decimal(m.group("pu")) or Decimal("0")
             imp = _to_decimal(m.group("importe")) or Decimal("0")
+
+            # --- PARCHE PARA SG VIGA (POR RFC) ---
+            if rfc == "SVI150417ST3":
+                prefijos_sat = [
+                    "CABLES PARA CABLEADO",
+                    "POSTES DE METAL",
+                    "PERFILES",
+                    "DRYWALL (TABLAROCA)",
+                    "LAMINA PANEL PARA TECHO, PANALES PARA TECHO",
+                    "LAMINA PANEL PARA TECHO",
+                    "CEMENTO",
+                    "CINTAS DE PAPEL",
+                    "BLOQUES DE CONCRETO",
+                    "TUBO PVC PARA USO COMERCIAL",
+                    "ACOPLES DE TUBOS DE PLÁSTICO PVC",
+                    "TABLA DE YESO",
+                    "ACOPLES DE TUBOS DE PLASTICO",
+                    "LENGÜETAS DE CONEXIÓN,",
+                    "CENTROS DE CARGA",
+                    "ROLLOS DE MANGUERAS",
+                    "BARRA O MALLA DE REFUERZO",
+                    "ACOPLAMIENTO REDUCTOR PARA TUBORS",
+                    "SUMINISTROS PARA SOLDAR",
+                    "LIJA DE DETALLE",
+                    "TUBO DE COBRE PARA USO COMERCIAL",
+                    "CONECTORES DE TUBO"
+                ]
+                prefijos_sat.sort(key=len, reverse=True)
+
+                up_concepto = concepto_txt.upper()
+                for pref in prefijos_sat:
+                    if up_concepto.startswith(pref):
+                        concepto_txt = concepto_txt[len(pref):].strip()
+                        if concepto_txt.startswith(","):
+                            concepto_txt = concepto_txt[1:].strip()
+                        break
+            # -------------------------------------
+
             conceptos.append(
                 Concepto(
                     cantidad=float(cant),
@@ -246,8 +318,8 @@ def _parse_page(lines: List[str], archivo_origen: str, page_no: int) -> Optional
         hoja_origen=hoja_origen,
     )
 
+
 def parse_pdf_invoice(path: str, *, use_ocr: bool = False) -> List[Factura]:
-    # use_ocr queda listo para futuro; hoy solo usamos pdfplumber
     p = Path(path)
     archivo_origen = p.name
 
@@ -258,6 +330,7 @@ def parse_pdf_invoice(path: str, *, use_ocr: bool = False) -> List[Factura]:
         if f is not None:
             out.append(f)
     return out
+
 
 def parse_pdf_files(paths: List[str], *, use_ocr: bool = False) -> List[Factura]:
     out: List[Factura] = []

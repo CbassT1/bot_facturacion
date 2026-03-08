@@ -302,6 +302,7 @@ class Factura:
 
     # NUEVO: flags útiles para UI
     es_usd: bool = False  # si la hoja es en dólares (ej: “DLLS”)
+    info_extra: str = ""  # <--- INCISIÓN 1: Aquí guardaremos la OBRA
 
 @dataclass
 class ColumnMapping:
@@ -1236,6 +1237,17 @@ class ExcelFacturaParser:
                 if not proveedor:
                     proveedor = "EDETESA"
 
+            # --- INCISIÓN 2: CAZADOR DE NOTAS "OBRA:" ---
+            nota_obra = ""
+            for _, r_temp in df.iterrows():
+                for val_temp in r_temp:
+                    if isinstance(val_temp, str) and str(val_temp).strip().upper().startswith("OBRA:"):
+                        nota_obra = str(val_temp).strip()
+                        break
+                if nota_obra:
+                    break
+            # --------------------------------------------
+
             all_conceptos: List[ConceptoFactura] = []
             indices = list(tabla.index)
             used_as_text = set()
@@ -1440,6 +1452,14 @@ class ExcelFacturaParser:
                         nombre_prod,
                     )
 
+                # --- INCISIÓN 3: EL FILTRO UNIVERSAL ANTI-ERRORES HUMANOS ---
+                # Si la unidad son puros números y son más de 6... ¡Es el producto!
+                if clave_unidad_final and clave_unidad_final.isdigit() and len(clave_unidad_final) >= 6:
+                    clave_prod_final = clave_unidad_final
+                    clave_unidad_final = "E48" if "SERVICIO" in normalize(concepto_str) else "H87"
+                    nombre_prod = CLAVES_NAME_MAP.get(clave_prod_final) if clave_prod_final else None
+                # ------------------------------------------------------------
+
                 if not (concepto_str or clave_prod_final or clave_unidad_final):
                     continue
 
@@ -1503,6 +1523,7 @@ class ExcelFacturaParser:
                 formato=formato_hoja or "DESCONOCIDO",
                 archivo=Path(f"{ruta.name}::{sheet_name}"),
                 es_usd=bool(es_usd),
+                info_extra=nota_obra,
             )
             facturas.append(factura)
 
