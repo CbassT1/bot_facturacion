@@ -13,6 +13,8 @@ from parser.reparadores.vega_ponce import reparar as reparar_vega_ponce
 from parser.reparadores.degaz import reparar as reparar_degaz
 from parser.reparadores.gasolineras import reparar as reparar_gasolineras
 from parser.reparadores.diegza import reparar_diegza
+from parser.reparadores.grajeda import reparar as reparar_grajeda
+from parser.reparadores.udg import reparar as reparar_udg
 
 
 class AjusteArchivosFrame(ttk.Frame):
@@ -75,6 +77,8 @@ class AjusteArchivosFrame(ttk.Frame):
             "DEGAZ (Extraer y vaciar en Molde 1)",
             "Gasolinera (Separar y asignar Cliente)",
             "DIEGZA / CLINNSA (Limpiar Conceptos Mezclados)",
+            "Solicitud 3.3 - Grajeda (Unir tabla dividida)",
+            "UDG Requisición - Ignorar claves nulas",
             "Limpieza Básica (Próximamente)"
         ]
         self.cmb_perfil = ttk.Combobox(inner_right, textvariable=self.var_perfil, values=opciones_perfil,
@@ -205,6 +209,10 @@ class AjusteArchivosFrame(ttk.Frame):
                         nuevos, errs = reparar_gasolineras(ruta_str, perfil, self.var_cliente_gas.get())
                     elif "DIEGZA" in perfil:
                         nuevos, errs = reparar_diegza(ruta_str, self.var_cliente_diegza.get())
+                    elif "Solicitud 3.3" in perfil:
+                        nuevos, errs = reparar_grajeda(ruta_str, perfil)
+                    elif "UDG Requisición" in perfil:
+                        nuevos, errs = reparar_udg(ruta_str, perfil)
                     else:
                         continue  # Próximamente limpieza básica
 

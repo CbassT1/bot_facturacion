@@ -107,6 +107,23 @@ _ROW_RE_B = re.compile(
     re.VERBOSE,
 )
 
+# REGEX C: GORETTI y archivos SIN Claves del SAT
+_ROW_RE_C = re.compile(
+    r"""
+    ^\s*
+    (?:(?P<item>\d+)\s+)?           # El número de ITEM al inicio (opcional)
+    (?P<cant>\d+(?:\.\d+)?)         # Cantidad
+    \s+
+    (?P<concepto>.+?)               # Descripción larga
+    \s+
+    \$?\s*(?P<pu>\d[\d,]*(?:\.\d+)?) # Precio Unitario
+    \s+
+    \$?\s*(?P<importe>\d[\d,]*(?:\.\d+)?) # Importe Total
+    \s*$
+    """,
+    re.VERBOSE,
+)
+
 _TOTAL_RE = re.compile(r"^\s*TOTAL:\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$", re.IGNORECASE)
 _SUBTOTAL_RE = re.compile(r"^\s*SUBTOTAL:\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$", re.IGNORECASE)
 _IVA_RE = re.compile(r"^\s*IVA:\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$", re.IGNORECASE)
@@ -114,9 +131,10 @@ _IVA_RE = re.compile(r"^\s*IVA:\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$", re.IGNORECASE)
 
 def _looks_like_invoice_page(lines: List[str]) -> bool:
     joined = "\n".join(lines[:180]).upper()
-    return ("SUBTOTAL" in joined and "IVA" in joined and "TOTAL" in joined) or (
-            "CANTIDAD" in joined and "CLAVE" in joined and "P.U." in joined
-    )
+    # Agregamos "PREC-UNIT" para que detecte los formatos de Goretti
+    return ("SUBTOTAL" in joined and "IVA" in joined and "TOTAL" in joined) or \
+        ("CANTIDAD" in joined and "CLAVE" in joined and "P.U." in joined) or \
+        ("PREC-UNIT" in joined)
 
 
 def _extract_meta(lines: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
@@ -277,6 +295,38 @@ def _parse_page(lines: List[str], archivo_origen: str, page_no: int) -> Optional
                     importe=float(imp),
                 )
             )
+            continue
+
+        # --- REGEX C: Archivos sin claves (GORETTI) ---
+        m = _ROW_RE_C.match(s)
+        if m:
+            concepto_txt = _clean_spaces(m.group("concepto"))
+
+            # Evitamos atrapar líneas basura que tengan formato similar
+            if "SUBTOTAL" not in concepto_txt.upper() and "TOTAL" not in concepto_txt.upper() and "IVA" not in concepto_txt.upper():
+                cant = _to_decimal(m.group("cant")) or Decimal("0")
+
+                # Inteligencia básica: Si habla de instalación, reparación o mantenimiento, es un servicio (E48)
+                # de lo contrario, asumimos que es una pieza de mobiliario (H87)
+                up_concepto = concepto_txt.upper()
+                clv_unid = "E48" if any(
+                    x in up_concepto for x in ["INSTALACION", "REPARACION", "MANTENIMIENTO", "TRABAJOS"]) else "H87"
+                clv_prod = "01010101"  # Clave genérica obligatoria
+
+                pu = _to_decimal(m.group("pu")) or Decimal("0")
+                imp = _to_decimal(m.group("importe")) or Decimal("0")
+
+                if pu > 0 or imp > 0:
+                    conceptos.append(
+                        Concepto(
+                            cantidad=float(cant),
+                            clave_unidad=clv_unid,
+                            clave_prod_serv=clv_prod,
+                            concepto=concepto_txt,
+                            precio_unitario=float(pu),
+                            importe=float(imp),
+                        )
+                    )
             continue
 
         ms = _SUBTOTAL_RE.match(s)

@@ -68,10 +68,7 @@ class Sucursal(Base):
 class FacturaGuardada(Base):
     __tablename__ = 'facturas_guardadas'
     id = Column(Integer, primary_key=True, autoincrement=True)
-
-    # --- NUEVA COLUMNA DE FECHA PARA REPORTES ---
     fecha_registro = Column(DateTime, default=datetime.now)
-
     archivo_origen = Column(String(255))
     hoja_origen = Column(String(100), nullable=True)
     rfc_cliente = Column(String(13))
@@ -90,6 +87,14 @@ class FacturaGuardada(Base):
     folio_fiscal = Column(String(100), nullable=True)
     mensaje_error = Column(Text, nullable=True)
 
+# --- NUEVA TABLA PARA EL PARSER Y MOTOR INTERCOMPAÑÍAS ---
+class CatalogoProveedor(Base):
+    __tablename__ = 'catalogo_proveedores'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nombre = Column(String(100), unique=True, nullable=False)
+    rfc = Column(String(13), nullable=True)
+    alias = Column(Text, nullable=True) # Aquí guardamos: "MARTO, GRUPOMARTINEZDELATORRE"
+
 
 # ==========================================
 # CONEXIÓN (SQLITE LOCAL)
@@ -97,13 +102,53 @@ class FacturaGuardada(Base):
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facturacion_local.db"))
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-# Agregamos check_same_thread=False para que el bot (que corre en segundo plano) no tenga problemas
 engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-def init_db():
-    # Esta es la función que main.py busca al iniciar
-    Base.metadata.create_all(bind=engine)
+def seed_catalogo_proveedores():
+    """Inyecta los proveedores base si la tabla está vacía."""
+    db = SessionLocal()
+    try:
+        if db.query(CatalogoProveedor).count() == 0:
+            proveedores_por_defecto = [
+                ("MITAFSA", "", "MITAFSA, MITFSA"),
+                ("BETANSA", "BET150415QAA", "BETANSA"),
+                ("ARGONZA", "", "ARGONZA"),
+                ("REKLAMSA", "", "REKLAMSA"),
+                ("ERF", "", "ERF"),
+                ("EDETESA", "", "EDETESA"),
+                ("XISISA", "", "XISISA"),
+                ("GEREDAB", "", "GEREDAB"),
+                ("TIKSA", "", "TIKSA"),
+                ("VIESA", "", "VIESA"),
+                ("DIAFIMSA", "", "DIAFIMSA"),
+                ("ARMOLEB", "", "ARMOLEB"),
+                ("JOVIC", "", "JOVIC"),
+                ("COLMEXL", "", "COLMEXL"),
+                ("MARTO", "", "MARTO, GRUPOMARTINEZDELATORRE, MARTINEZDELATORRE"),
+                ("CHESTER", "", "CHESTER")
+            ]
+            for nom, rfc, alias in proveedores_por_defecto:
+                nuevo = CatalogoProveedor(nombre=nom, rfc=rfc, alias=alias)
+                db.add(nuevo)
+            db.commit()
+            print("Catálogo de proveedores inicializado con éxito.")
+    except Exception as e:
+        print(f"Error al inicializar catálogo: {e}")
+    finally:
+        db.close()
 
-# La dejamos también global por precaución
+def obtener_proveedores_alias():
+    """Devuelve la lista de proveedores al Parser."""
+    db = SessionLocal()
+    try:
+        filas = db.query(CatalogoProveedor.nombre, CatalogoProveedor.alias).all()
+        return [(f.nombre, f.alias) for f in filas]
+    finally:
+        db.close()
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    seed_catalogo_proveedores()
+
 Base.metadata.create_all(bind=engine)

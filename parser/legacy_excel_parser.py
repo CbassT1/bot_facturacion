@@ -6,6 +6,7 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional
+from app.database.database import obtener_proveedores_alias
 
 import pandas as pd
 from openpyxl import load_workbook
