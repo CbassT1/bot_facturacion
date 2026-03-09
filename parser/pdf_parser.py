@@ -388,3 +388,45 @@ def parse_pdf_files(paths: List[str], *, use_ocr: bool = False) -> List[Factura]
         if str(p).lower().endswith(".pdf"):
             out.extend(parse_pdf_invoice(p, use_ocr=use_ocr))
     return out
+
+
+def extract_clone_data(path: str) -> dict:
+    """Extrae únicamente el Emisor, Folio y RFC del PDF para clonación web."""
+    import pdfplumber
+
+    data = {"proveedor": "Desconocido", "folio": "No detectado", "total": 0.0, "rfc_cliente": "XEXX010101000"}
+
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+
+            # 1. Buscar Folio (Regex tolerante a saltos de línea y comillas del PDF)
+            m_folio = re.search(r'Serie y Folio[\s\"\:\,]*([A-Za-z0-9\-]+)', text, re.IGNORECASE)
+            if m_folio:
+                data["folio"] = m_folio.group(1)
+
+            # 2. Buscar Proveedor (Usamos tu normalizador dinámico de base de datos)
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            for ln in lines[:15]:
+                prov_canon = normalize_proveedor(ln)
+                if prov_canon:
+                    data["proveedor"] = prov_canon
+                    break
+
+            # 3. Buscar RFC Cliente
+            m_rfc = re.search(r'RFC:\s*([A-Z0-9]{12,13})', text)
+            if m_rfc:
+                data["rfc_cliente"] = m_rfc.group(1)
+
+            # 4. Buscar Total Original (Solo para mostrarlo de referencia en UI)
+            m_tot = re.search(r'TOTAL:?[\s\"\:\,]*\$?\s*([\d,\.]+)', text, re.IGNORECASE)
+            if m_tot:
+                try:
+                    data["total"] = float(m_tot.group(1).replace(",", ""))
+                except:
+                    pass
+
+            if data["folio"] != "No detectado" and data["proveedor"] != "Desconocido":
+                break
+
+    return data

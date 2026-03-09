@@ -1,18 +1,19 @@
 # app/ui/frames/clonador.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import copy
 from pathlib import Path
 
 from app.ui.theme import get_pal
-from parser.pdf_parser import parse_pdf_invoice
+from app.models import Factura, Cliente, DatosFactura, Concepto
+from parser.pdf_parser import extract_clone_data
 
 
 class ClonadorFacturasFrame(ttk.Frame):
     def __init__(self, master, controller):
         super().__init__(master)
         self.controller = controller
-        self.factura_original = None
+        self.datos_extraidos = None
+        self.ruta_actual = None
         self._is_updating = False
         self._build_ui()
 
@@ -24,18 +25,19 @@ class ClonadorFacturasFrame(ttk.Frame):
         header.pack(fill="x", padx=16, pady=(16, 10))
 
         ttk.Button(header, text="← Volver", command=lambda: self.controller.show("menu")).pack(side="left")
-        ttk.Label(header, text="Clonador de Facturas", font=("Segoe UI", 16, "bold")).pack(side="left", padx=(12, 0))
+        ttk.Label(header, text="Clonador de Facturas (Portal Web)", font=("Segoe UI", 16, "bold")).pack(side="left",
+                                                                                                        padx=(12, 0))
         ttk.Button(header, text=self.controller.theme_button_label(), command=self._toggle_theme).pack(side="right")
 
         # --- BODY ---
         body = ttk.Frame(self)
         body.pack(fill="both", expand=True, padx=16, pady=10)
 
-        # Contenedor central para que no se vea estirado en pantallas grandes
         center_container = ttk.Frame(body)
         center_container.place(relx=0.5, rely=0.4, anchor="center")
 
-        ttk.Label(center_container, text="Importe un documento PDF anterior, ajuste el monto y agregue notas.",
+        ttk.Label(center_container,
+                  text="Extrae el folio de una factura anterior para duplicarla automáticamente en el portal.",
                   style="Muted.TLabel").pack(pady=(0, 20))
 
         # --- SELECCIÓN DE ARCHIVO ---
@@ -48,8 +50,16 @@ class ClonadorFacturasFrame(ttk.Frame):
         self.lbl_archivo = ttk.Label(row_file, text="Ningún archivo seleccionado...", font=("Segoe UI", 10, "italic"))
         self.lbl_archivo.pack(side="left", padx=10)
 
-        # --- PANEL DE CÁLCULO Y DATOS EXTRAS (Oculto al inicio) ---
-        self.panel_calculo = ttk.LabelFrame(center_container, text="Nuevos Datos", padding=20)
+        # --- PANEL DE DATOS DETECTADOS ---
+        self.panel_detectado = ttk.LabelFrame(center_container, text="Llave Maestra Detectada", padding=15)
+        self.lbl_proveedor = ttk.Label(self.panel_detectado, text="Emisor: -", font=("Segoe UI", 11, "bold"))
+        self.lbl_proveedor.pack(anchor="w")
+        self.lbl_folio = ttk.Label(self.panel_detectado, text="Folio a Duplicar: -", font=("Segoe UI", 11, "bold"),
+                                   foreground=pal["ACCENT"])
+        self.lbl_folio.pack(anchor="w", pady=5)
+
+        # --- PANEL DE CÁLCULO Y DATOS EXTRAS ---
+        self.panel_calculo = ttk.LabelFrame(center_container, text="Nuevos Valores", padding=20)
 
         self.var_subtotal = tk.StringVar(value="0.00")
         self.var_total = tk.StringVar(value="0.00")
@@ -77,36 +87,40 @@ class ClonadorFacturasFrame(ttk.Frame):
         self.ent_info = ttk.Entry(grid_montos, textvariable=self.var_info_extra, font=("Segoe UI", 12), width=28)
         self.ent_info.grid(row=2, column=1, pady=15, padx=10)
 
-        self.btn_clonar = ttk.Button(self.panel_calculo, text="Crear Copia y Enviar a Bandeja", style="Primary.TButton",
-                                     command=self._procesar_clon)
+        self.btn_clonar = ttk.Button(self.panel_calculo, text="⚙️ Preparar Clonación Bot y Enviar",
+                                     style="Primary.TButton", command=self._procesar_clon)
 
     def _seleccionar_pdf(self):
         ruta = filedialog.askopenfilename(title="Selecciona la Factura Original", filetypes=[("PDF", "*.pdf")])
         if not ruta: return
 
+        self.ruta_actual = ruta
         self.lbl_archivo.config(text=Path(ruta).name)
 
         try:
-            facturas = parse_pdf_invoice(ruta)
-            if not facturas:
-                messagebox.showerror("Error", "No se pudo extraer información del PDF.")
+            self.datos_extraidos = extract_clone_data(ruta)
+
+            if self.datos_extraidos["folio"] == "No detectado":
+                messagebox.showerror("Error",
+                                     "No se encontró el Folio en el PDF.\nEl bot necesita el folio para duplicar en la web.")
                 return
 
-            self.factura_original = facturas[0]
+            # Mostrar UI
+            self.panel_detectado.pack(fill="x", pady=10)
+            self.lbl_proveedor.config(text=f"Emisor: {self.datos_extraidos['proveedor']}")
+            self.lbl_folio.config(text=f"Folio a Duplicar: {self.datos_extraidos['folio']}")
 
-            # Mostramos el panel de cálculo
             self.panel_calculo.pack(fill="both", expand=True, pady=10)
             self.btn_clonar.pack(fill="x", side="bottom", pady=(20, 0), ipady=8)
 
-            subtotal_orig = self.factura_original.total / 1.16 if self.factura_original.total else 0.0
+            subtotal_orig = self.datos_extraidos["total"] / 1.16 if self.datos_extraidos["total"] else 0.0
 
             self._is_updating = True
             self.var_subtotal.set(f"{subtotal_orig:.2f}")
-            self.var_total.set(f"{self.factura_original.total:.2f}")
+            self.var_total.set(f"{self.datos_extraidos['total']:.2f}")
             self._is_updating = False
 
-            self.controller.set_status(
-                f"Factura leída correctamente. Total Original: ${self.factura_original.total:,.2f}")
+            self.controller.set_status("Llave Maestra extraída correctamente.")
 
         except Exception as e:
             messagebox.showerror("Error de lectura", f"Ocurrió un problema:\n{e}")
@@ -142,33 +156,45 @@ class ClonadorFacturasFrame(ttk.Frame):
                 messagebox.showwarning("Aviso", "El total debe ser mayor a 0.")
                 return
 
-            clon = copy.deepcopy(self.factura_original)
+            folio_target = self.datos_extraidos["folio"]
+            prov = self.datos_extraidos["proveedor"]
+            rfc = self.datos_extraidos["rfc_cliente"]
+            info_usuario = self.var_info_extra.get().strip()
 
-            subtotal_original = sum(c.importe for c in clon.conceptos)
-            factor = nuevo_subtotal / subtotal_original if subtotal_original > 0 else 1.0
+            # MAGIA: Ocultamos las instrucciones para Playwright en las Notas Extra
+            instruccion_bot = f"[CLONAR_WEB:{folio_target}]"
+            notas_finales = f"{instruccion_bot} | {info_usuario}" if info_usuario else instruccion_bot
 
-            for c in clon.conceptos:
-                c.precio_unitario = c.precio_unitario * factor
-                c.importe = c.importe * factor
+            # Creamos una factura fantasma con 1 solo concepto de referencia
+            factura_clon = Factura(
+                id=f"CLON-{folio_target}",
+                cliente=Cliente(proveedor=prov, rfc=rfc),
+                datos_factura=DatosFactura(uso_cfdi="G03", metodo_pago="PPD", forma_pago="99",
+                                           info_extra=notas_finales),
+                conceptos=[
+                    Concepto(
+                        cantidad=1.0,
+                        clave_unidad="ACT",
+                        clave_prod_serv="01010101",
+                        concepto="[CLONACIÓN WEB] - El Bot editará el concepto original del portal.",
+                        precio_unitario=nuevo_subtotal,
+                        importe=nuevo_subtotal
+                    )
+                ],
+                total=nuevo_total,
+                archivo_origen=Path(self.ruta_actual).name,
+                hoja_origen="BOT_PORTAL"
+            )
 
-            clon.total = nuevo_total
-            clon.id = f"[CLON] {clon.id}"
-
-            texto_extra = self.var_info_extra.get().strip()
-            if texto_extra:
-                if clon.notas_extra:
-                    clon.notas_extra += f" | {texto_extra}"
-                else:
-                    clon.notas_extra = texto_extra
-
-            # Limpiar la pantalla para el próximo uso
+            # Limpiar pantalla
             self.lbl_archivo.config(text="Ningún archivo seleccionado...")
+            self.panel_detectado.pack_forget()
             self.panel_calculo.pack_forget()
             self.var_info_extra.set("")
 
-            # Enviar la factura clonada directamente al visor
-            self.controller.open_visor([clon])
-            self.controller.set_status("Factura clonada generada correctamente.")
+            # Enviar a bandeja
+            self.controller.open_visor([factura_clon])
+            self.controller.set_status("Instrucción de clonación lista para emitir.")
 
         except Exception as e:
             messagebox.showerror("Error", f"Verifica los números ingresados:\n{e}")
