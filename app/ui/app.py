@@ -21,6 +21,7 @@ from app.ui.frames.pendientes import PendientesFrame
 from app.ui.frames.proveedores import ProveedoresFrame
 from app.ui.frames.reportes import ReportesFrame
 from app.ui.frames.ajuste_archivos import AjusteArchivosFrame
+from app.ui.frames.clonador import ClonadorFacturasFrame
 
 # Drag & Drop real (requiere que el root sea TkinterDnD.Tk)
 try:
@@ -127,6 +128,7 @@ class App(_BaseTk):
         self.frames["proveedores"] = ProveedoresFrame(self.container, controller=self)
         self.frames["reportes"] = ReportesFrame(self.container, controller=self)
         self.frames["ajustar"] = AjusteArchivosFrame(self.container, controller=self)
+        self.frames["clonador"] = ClonadorFacturasFrame(self.container, controller=self)
 
         # --- NUEVO FRAME DE PENDIENTES ---
         self.frames["pendientes"] = PendientesFrame(self.container, controller=self)

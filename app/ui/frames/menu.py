@@ -24,16 +24,14 @@ class MenuPrincipalFrame(ttk.Frame):
         footer_frame = ttk.Frame(self)
         footer_frame.pack(side="bottom", fill="x", padx=20, pady=15)
 
-        ttk.Label(footer_frame, text="Versión 1.0 Beta", style="Muted.TLabel").pack(side="right")
+        ttk.Label(footer_frame, text="Versión 1.0", style="Muted.TLabel").pack(side="right")
 
         # --- CONTENEDOR CENTRAL MAESTRO ---
-        # Usamos 'place' para que este bloque siempre flote exactamente en el centro de la ventana
         master_container = ttk.Frame(self)
         master_container.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Cabecera Central (Título)
         header_frame = ttk.Frame(master_container)
-        header_frame.pack(fill="x", pady=(0, 45))  # Mayor separación hacia las tarjetas
+        header_frame.pack(fill="x", pady=(0, 45))
 
         ttk.Label(header_frame, text="FactBot", font=("Segoe UI", 36, "bold")).pack(anchor="center")
         ttk.Label(header_frame, text="Panel de Control Principal", font=("Segoe UI", 13), style="Muted.TLabel").pack(
@@ -44,11 +42,8 @@ class MenuPrincipalFrame(ttk.Frame):
         grid_frame.pack(expand=True)
 
         def create_module_card(parent, title, desc, command, row, col):
-            # highlightthickness=2 hace que el borde se note más
             card = tk.Frame(parent, bg=pal["SURFACE"], cursor="hand2", highlightbackground=pal["BORDER"],
                             highlightthickness=2)
-
-            # Aumentamos padx y pady para separar más las tarjetas entre sí
             card.grid(row=row, column=col, padx=20, pady=20, sticky="nsew")
 
             inner = tk.Frame(card, bg=pal["SURFACE"], cursor="hand2")
@@ -62,7 +57,6 @@ class MenuPrincipalFrame(ttk.Frame):
                                 cursor="hand2")
             lbl_desc.pack()
 
-            # Efecto Hover con el Borde Iluminado (ACCENT)
             def on_enter(e):
                 card.configure(bg=pal["SURFACE2"], highlightbackground=pal["ACCENT"])
                 inner.configure(bg=pal["SURFACE2"])
@@ -91,6 +85,8 @@ class MenuPrincipalFrame(ttk.Frame):
                            lambda: self.controller.show("reportes"), 1, 1)
         create_module_card(grid_frame, "Ajuste de Formatos", "Reparar Excels con formato dañado",
                            lambda: self.controller.show("ajustar"), 2, 0)
+        create_module_card(grid_frame, "Clonador de Facturas", "Duplicar facturas con nuevos montos",
+                           lambda: self.controller.show("clonador"), 2, 1)
 
         grid_frame.columnconfigure(0, minsize=340)
         grid_frame.columnconfigure(1, minsize=340)

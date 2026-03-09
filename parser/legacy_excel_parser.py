@@ -11,6 +11,35 @@ from app.database.database import obtener_proveedores_alias
 import pandas as pd
 from openpyxl import load_workbook
 
+# Memoria caché para no consultar la base de datos en cada renglón
+_DYNAMIC_MAPPING = []
+
+# LO DEJAMOS VACÍO POR DEFECTO. ¡Se llenará con la Base de Datos!
+PROVEEDOR_CANONICOS: set[str] = set()
+
+
+def cargar_proveedores_en_memoria():
+    global _DYNAMIC_MAPPING
+    global PROVEEDOR_CANONICOS  # Llamamos a la variable global
+
+    _DYNAMIC_MAPPING.clear()
+    PROVEEDOR_CANONICOS.clear()
+
+    filas = obtener_proveedores_alias()
+    for nombre, alias_str in filas:
+        nombre_limpio = str(nombre).upper().strip()
+
+        # 1. Agregamos el nombre oficial a la lista de canónicos
+        PROVEEDOR_CANONICOS.add(nombre_limpio)
+
+        # 2. Separamos los alias por comas para el normalizador
+        tokens = [t.strip().upper() for t in (alias_str or "").split(",") if t.strip()]
+        if nombre_limpio not in tokens:
+            tokens.append(nombre_limpio)
+
+        _DYNAMIC_MAPPING.append((nombre_limpio, tokens))
+
+
 warnings.filterwarnings("ignore")
 
 BASE_DIR = Path(__file__).parent
@@ -25,26 +54,6 @@ UNIDADES_NAME_MAP: dict[str, str] = {}
 
 CLAVES_SET: set[str] = set()
 CLAVES_NAME_MAP: dict[str, str] = {}
-
-PROVEEDOR_CANONICOS = {
-    "MITAFSA",
-    "BETANSA",
-    "ARGONZA",
-    "REKLAMSA",
-    "ERF",
-    "EDETESA",
-    "XISISA",
-    "GEREDAB",
-    "TIKSA",
-    "VIESA",
-    "DIAFIMSA",
-    "ARMOLEB",
-    "JOVIC",
-    "COLMEXL",
-    "MARTO",
-    "CHESTER",
-}
-
 # ====================== UTILIDADES BÁSICAS ======================
 
 def normalize(text: str) -> str:
@@ -140,26 +149,11 @@ def normalize_proveedor(name: Optional[str]) -> Optional[str]:
     if not s_norm:
         return None
 
-    mapping = [
-        ("MITAFSA", ["MITAFSA", "MITFSA"]),
-        ("BETANSA", ["BETANSA"]),
-        ("ARGONZA", ["ARGONZA"]),
-        ("REKLAMSA", ["REKLAMSA"]),
-        ("ERF", ["ERF"]),
-        ("EDETESA", ["EDETESA"]),
-        ("XISISA", ["XISISA"]),
-        ("GEREDAB", ["GEREDAB"]),
-        ("TIKSA", ["TIKSA"]),
-        ("VIESA", ["VIESA"]),
-        ("DIAFIMSA", ["DIAFIMSA"]),
-        ("ARMOLEB", ["ARMOLEB"]),
-        ("JOVIC", ["JOVIC"]),
-        ("COLMEXL", ["COLMEXL"]),
-        ("MARTO", ["MARTO", "GRUPOMARTINEZDELATORRE", "MARTINEZDELATORRE"]),
-        ("CHESTER", ["CHESTER"]),
-    ]
+    # --- MAGIA DINÁMICA: Usar la base de datos en memoria ---
+    if not _DYNAMIC_MAPPING:
+        cargar_proveedores_en_memoria()
 
-    for canon, tokens in mapping:
+    for canon, tokens in _DYNAMIC_MAPPING:
         for tok in tokens:
             if tok in s_norm:
                 return canon
