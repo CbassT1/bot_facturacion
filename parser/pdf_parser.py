@@ -419,7 +419,7 @@ def extract_clone_data(path: str) -> dict:
                 data["rfc_cliente"] = m_rfc.group(1)
 
             # 4. Buscar Total Original (Solo para mostrarlo de referencia en UI)
-            m_tot = re.search(r'TOTAL:?[\s\"\:\,]*\$?\s*([\d,\.]+)', text, re.IGNORECASE)
+            m_tot = re.search(r'\bTOTAL:?[\s\"\:\,]*\$?\s*([\d,\.]+)', text, re.IGNORECASE)
             if m_tot:
                 try:
                     data["total"] = float(m_tot.group(1).replace(",", ""))
