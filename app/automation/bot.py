@@ -136,31 +136,179 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     caja_busqueda_cfdi.press("Enter")
                     page.wait_for_timeout(1000)
 
+                    # --- PASO 3.5: ESCUDO DE AUTO-ALTA DE CLIENTES ---
                     log_callback("Verificando registro del cliente...")
                     caja_razon = page.get_by_role("textbox", name=re.compile(r"Ingresa la Razón Social", re.IGNORECASE))
                     razon_social = caja_razon.input_value().strip()
 
                     if not razon_social:
-                        log_callback("⚠️ ALERTA: Cliente NO registrado.")
-                        log_callback("Inyectando botón de pausa en el navegador...")
+                        log_callback("⚠️ ALERTA: Cliente NO registrado. Abriendo asistente de Alta...")
 
-                        page.evaluate("""
-                            window.botContinuar = false;
-                            let btn = document.createElement('button');
-                            btn.innerHTML = '▶ TERMINÉ EL ALTA - CONTINUAR BOT';
-                            btn.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:20px 40px; font-size:22px; font-weight:bold; background-color:#E53935; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);';
-                            btn.onclick = function() {
-                                window.botContinuar = true;
-                                this.innerHTML = 'Continuando...';
-                                this.style.backgroundColor = '#43A047';
-                            };
-                            document.body.appendChild(btn);
-                        """)
+                        datos_alta = None
+                        import threading
+                        evento_modal = threading.Event()
 
-                        page.wait_for_function("window.botContinuar === true", timeout=0)
-                        log_callback("Bot reanudado. Continuando con la factura...")
-                        page.wait_for_timeout(3000)
+                        def abrir_modal_alta():
+                            nonlocal datos_alta
+                            from app.ui.frames.alta_cliente_modal import AltaClienteModal
+                            import tkinter as tk
 
+                            root = tk._default_root
+                            modal = AltaClienteModal(root, rfc_buscado=rfc_cliente)
+                            root.wait_window(modal)
+                            datos_alta = modal.datos_finales
+                            evento_modal.set()
+
+                        import tkinter as tk
+                        tk._default_root.after(0, abrir_modal_alta)
+
+                        log_callback("Esperando a que completes el formulario en pantalla...")
+                        evento_modal.wait()
+
+                        if not datos_alta:
+                            raise Exception("Se canceló el alta de cliente. Bot abortado.")
+
+                        log_callback("Iniciando inyección de Nuevo Cliente en el portal...")
+
+                        page.get_by_role("button", name="Nuevo Receptor").click()
+                        page.wait_for_timeout(1500)
+
+                        page.locator("#rfc").click()
+                        page.locator("#rfc").fill(datos_alta["rfc"])
+
+                        page.locator("#clienteForm").get_by_role("textbox", name="Ingresa la Razón Social de tu").fill(
+                            datos_alta["razon"])
+
+                        if datos_alta["curp"]:
+                            page.get_by_role("textbox", name=re.compile("CURP", re.I)).fill(datos_alta["curp"])
+
+                        page.locator(
+                            ".panel-body > form > .formRow > div > .inputWrapper > .selectinput > .below > .single > .placeholder").click()
+                        page.keyboard.type(datos_alta["regimen"], delay=100)
+                        page.wait_for_timeout(500)
+                        page.keyboard.press("Enter")
+                        page.locator("#collapseRegimenesFiscales").get_by_role("button",
+                                                                               name=re.compile("Agregar", re.I)).click()
+                        page.wait_for_timeout(500)
+
+                        page.get_by_role("button", name="Agregar dirección").click()
+                        page.wait_for_timeout(1000)
+
+                        page.locator(".selectinput.selectClear.w-100 > .below > .single > .placeholder").first.click()
+                        page.get_by_role("textbox", name="Escribe para buscar...").fill("MEX")
+                        page.wait_for_timeout(500)
+                        page.keyboard.press("Enter")
+
+                        page.get_by_role("textbox", name="Código Postal").fill(datos_alta["cp"])
+                        page.wait_for_timeout(1500)
+
+                        if datos_alta["colonia"]:
+                            log_callback(f"Intentando seleccionar colonia: {datos_alta['colonia']}...")
+                            try:
+                                page.locator(
+                                    "div:nth-child(3) > div:nth-child(3) > .inputWrapper > .selectinput > .below > .single > .placeholder").click(
+                                    timeout=5000)
+                                page.wait_for_timeout(1000)
+
+                                caja_busqueda = page.get_by_role("textbox", name="Escribe para buscar...")
+
+                                if caja_busqueda.is_visible():
+                                    caja_busqueda.fill(datos_alta["colonia"])
+                                    page.wait_for_timeout(1500)
+                                    caja_busqueda.press("Enter")
+                                else:
+                                    page.get_by_role("option",
+                                                     name=re.compile(datos_alta["colonia"], re.IGNORECASE)).first.click(
+                                        timeout=3000)
+
+                                page.wait_for_timeout(500)
+
+                            except Exception as e:
+                                log_callback(f"⚠️ Colonia no encontrada. Ignorando...")
+                                page.wait_for_timeout(500)
+
+                        # --- CALLE Y NÚMEROS ---
+                        page.get_by_role("textbox", name="Calle o Avenida del cliente").click(force=True)
+                        page.get_by_role("textbox", name="Calle o Avenida del cliente").fill(datos_alta["calle"])
+                        page.get_by_role("textbox", name="Número exterior").fill(datos_alta["num_ext"])
+
+                        if datos_alta["num_int"]:
+                            page.get_by_role("textbox", name="Número interior").fill(datos_alta["num_int"])
+
+                        # --- CORREO ELECTRÓNICO ---
+                        caja_correo = page.get_by_role("textbox",
+                                                       name=re.compile("Correo electrónico", re.IGNORECASE)).first
+                        caja_correo.scroll_into_view_if_needed()
+                        caja_correo.click(force=True)
+                        caja_correo.fill(datos_alta["correo"])
+                        page.wait_for_timeout(500)
+                        caja_correo.press("Enter")
+                        page.wait_for_timeout(1000)
+
+                        # --- GUARDAR DIRECCIÓN ---
+                        log_callback("Guardando dirección...")
+                        page.locator("#agregarNueva").get_by_role("button", name="Guardar").click(force=True)
+                        page.wait_for_timeout(1500)
+
+                        # --- GUARDADO FINAL DEL CLIENTE ---
+                        log_callback("Guardando cliente en el portal...")
+                        btn_guardar_cliente = page.locator("app-admin-clientes").get_by_role("button", name=re.compile(
+                            r"^Guardar$", re.IGNORECASE)).first
+                        btn_guardar_cliente.click(force=True)
+
+                        # Damos tiempo a que guarde y regrese a la pantalla de Clientes
+                        page.wait_for_timeout(2500)
+
+                        log_callback("Cerrando la ventana del directorio de Clientes...")
+                        try:
+                            # 1. Intentamos hacer clic en la "X" (Close) del modal gigante
+                            btn_x_modal = page.locator("modal-container button.close, button[aria-label='Close']").last
+                            if btn_x_modal.is_visible(timeout=3000):
+                                btn_x_modal.click(force=True)
+                                log_callback("Ventana cerrada con el botón 'X'.")
+                        except Exception:
+                            log_callback("⚠️ No se vio el botón 'X', intentando forzar cierre...")
+                            pass
+
+                        # 2. PLAN DE RESPALDO: Presionamos "Escape" un par de veces para matar cualquier ventana flotante
+                        page.keyboard.press("Escape")
+                        page.wait_for_timeout(500)
+                        page.keyboard.press("Escape")
+
+                        # 3. Esperamos a que la pantalla quede limpia
+                        try:
+                            page.locator("modal-container").last.wait_for(state="hidden", timeout=4000)
+                        except Exception:
+                            log_callback("⚠️ El modal principal parece seguir ahí. Cruzando los dedos...")
+
+                        page.wait_for_timeout(1500)
+
+                        # --- RETOMAR LA FACTURA ---
+                        log_callback("¡Cliente registrado! Retomando la factura...")
+
+                        caja_rfc_principal = page.get_by_role("textbox", name="Ingresa el RFC de tu cliente").first
+                        caja_rfc_principal.click(force=True)
+                        caja_rfc_principal.press("Control+A")
+                        caja_rfc_principal.press("Backspace")
+                        caja_rfc_principal.fill(datos_alta["rfc"])
+                        caja_rfc_principal.press("Enter")
+
+                        log_callback("Esperando a que el sistema valide el nuevo RFC...")
+                        page.wait_for_timeout(5000)
+
+                        log_callback("Seleccionando Uso de CFDI renovado...")
+                        caja_uso_cfdi_renovada = page.locator("div").filter(
+                            has_text=re.compile(r"^Uso de CFDI", re.IGNORECASE)).locator(".selectinput").first
+                        caja_uso_cfdi_renovada.click(force=True)
+                        page.wait_for_timeout(1000)
+
+                        caja_busqueda_renovada = page.get_by_role("textbox", name="Escribe para buscar...").last
+                        caja_busqueda_renovada.click(force=True)
+                        caja_busqueda_renovada.type(uso_cfdi_bd[:3], delay=100)
+                        page.wait_for_timeout(1500)
+                        caja_busqueda_renovada.press("Enter")
+                        page.wait_for_timeout(1000)
+                        
                     log_callback("Seleccionando Tipo de Comprobante...")
                     caja_comprobante = page.locator("div").filter(
                         has_text=re.compile(r"^Tipo de Comprobante", re.IGNORECASE)).locator(".selectinput").first
@@ -432,6 +580,9 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
                     factura.estado = "Error"
                     factura.mensaje_error = str(ex_interna)
                     db.commit()
+                    # === MAGIA APLICADA: Modo Detective ===
+                    log_callback("🛑 El bot falló. Abriendo Inspector de Playwright. ¡Revisa la ventana!")
+                    if page: page.pause()
 
             # ======================================================
             # FIN DEL PROGRAMA (CIERRE AUTOMÁTICO SEGURO)
@@ -439,7 +590,6 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
             log_callback("=======================================")
             log_callback("Lote finalizado. El navegador se cerrará en 4 segundos...")
 
-            # --- SOLUCIÓN AL CONGELAMIENTO: Tiempo definido, no infinito ---
             if page:
                 page.wait_for_timeout(4000)
 
@@ -450,6 +600,8 @@ def ejecutar_bot(factura_ids: list[int], log_callback):
 
     except Exception as e:
         log_callback(f"❌ Error crítico general: {str(e)}")
+        # Para errores catastróficos, también dejamos un pause si la página existe
+        if 'page' in locals() and page: page.pause()
     finally:
         db.close()
 
@@ -515,7 +667,6 @@ def _rutina_clonar_factura(page, factura, target, log_callback, db):
 
         # --- ESPERA SENSORIAL (A prueba de borradores) ---
         try:
-            # Si aparece "Ver Detalle", sabemos que hay al menos una factura emitida real.
             page.get_by_role("cell").filter(has_text=re.compile(r"Ver Detalle", re.IGNORECASE)).first.wait_for(
                 state="visible", timeout=15000)
         except Exception:
@@ -526,10 +677,8 @@ def _rutina_clonar_factura(page, factura, target, log_callback, db):
         # --- PASO 4: SELECCIONAR LA FACTURA ---
         log_callback("Identificando la celda de opciones de la factura...")
 
-        # Al agarrar la primera celda con "Ver Detalle", ignoramos automáticamente los borradores.
         celda_acciones = page.get_by_role("cell").filter(has_text=re.compile(r"Ver Detalle", re.IGNORECASE)).first
 
-        # Clic para "despertar" la fila (A veces Angular lo necesita)
         try:
             celda_acciones.click(force=True)
         except:
@@ -540,7 +689,7 @@ def _rutina_clonar_factura(page, factura, target, log_callback, db):
 
         # --- PASO 5: DUPLICAR ---
         log_callback("Abriendo opciones y haciendo clic en Duplicar...")
-        btn_opciones.evaluate("node => node.click()")  # Inyección JS Anti-Chat
+        btn_opciones.evaluate("node => node.click()")
         page.wait_for_timeout(1500)
 
         page.get_by_text("Duplicar").first.click(force=True)
@@ -636,7 +785,6 @@ def _rutina_clonar_factura(page, factura, target, log_callback, db):
             db.commit()
 
             try:
-                # Inyectamos el botón de pausa para revisión manual
                 page.evaluate("""
                         let btn = document.createElement('button');
                         btn.id = 'btn-espera-bot';
@@ -661,5 +809,5 @@ def _rutina_clonar_factura(page, factura, target, log_callback, db):
         factura.mensaje_error = str(e)
         db.commit()
 
-        log_callback("🛑 MODO DETECTIVE: El navegador se pausó para que revises qué salió mal.")
+        log_callback("MODO DETECTIVE: El navegador se pausó para que revises qué salió mal.")
         page.pause()

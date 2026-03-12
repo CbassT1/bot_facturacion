@@ -2,7 +2,8 @@
 import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from app.database.database import SessionLocal, ProveedorCredencial, Sucursal, encrypt_password, decrypt_password
+from app.database.database import SessionLocal, ProveedorCredencial, Sucursal, CatalogoProveedor, encrypt_password, \
+    decrypt_password
 from app.ui.theme import get_pal
 
 
@@ -11,9 +12,11 @@ class ProveedoresFrame(ttk.Frame):
         super().__init__(master)
         self.controller = controller
 
-        # --- Variables del formulario PROVEEDORES ---
+        # --- Variables del formulario PROVEEDORES (Unificadas) ---
         self.var_id = tk.StringVar()
         self.var_proveedor = tk.StringVar()
+        self.var_rfc = tk.StringVar()  # <--- NUEVO
+        self.var_alias = tk.StringVar()  # <--- NUEVO
         self.var_usuario = tk.StringVar()
         self.var_password = tk.StringVar()
         self._pass_visible = False
@@ -63,46 +66,62 @@ class ProveedoresFrame(ttk.Frame):
     # INTERFAZ: PESTAÑA PROVEEDORES
     # ========================================================
     def _build_tab_proveedores(self, pal):
-        form_frame = ttk.LabelFrame(self.tab_proveedores, text="Registrar / Editar Credencial")
+        form_frame = ttk.LabelFrame(self.tab_proveedores, text="Registrar / Editar Proveedor (Parser y Bot)")
         form_frame.pack(fill="x", padx=12, pady=(10, 15))
 
         inner_form = ttk.Frame(form_frame)
         inner_form.pack(fill="x", padx=10, pady=10)
 
-        ttk.Label(inner_form, text="Proveedor:").grid(row=0, column=0, sticky="w", padx=(0, 5))
-        ttk.Entry(inner_form, textvariable=self.var_proveedor, width=35).grid(row=0, column=1, sticky="w", padx=(0, 15))
+        # Fila 1: Datos para Extracción (Parser)
+        ttk.Label(inner_form, text="Nombre Oficial:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        ttk.Entry(inner_form, textvariable=self.var_proveedor, width=28).grid(row=0, column=1, sticky="w", padx=(0, 15))
 
-        ttk.Label(inner_form, text="Usuario:").grid(row=0, column=2, sticky="w", padx=(0, 5))
-        ttk.Entry(inner_form, textvariable=self.var_usuario, width=30).grid(row=0, column=3, sticky="w", padx=(0, 15))
+        ttk.Label(inner_form, text="RFC:").grid(row=0, column=2, sticky="w", padx=(0, 5))
+        ttk.Entry(inner_form, textvariable=self.var_rfc, width=18).grid(row=0, column=3, sticky="w", padx=(0, 15))
 
-        ttk.Label(inner_form, text="Contraseña:").grid(row=0, column=4, sticky="w", padx=(0, 5))
-        self.entry_password = ttk.Entry(inner_form, textvariable=self.var_password, width=25, show="*")
-        self.entry_password.grid(row=0, column=5, sticky="w", padx=(0, 5))
+        ttk.Label(inner_form, text="Alias (Comas):").grid(row=0, column=4, sticky="w", padx=(0, 5))
+        ttk.Entry(inner_form, textvariable=self.var_alias, width=35).grid(row=0, column=5, sticky="w", padx=(0, 15))
+
+        # Fila 2: Datos para el Bot
+        ttk.Label(inner_form, text="Usuario SAT:").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=(10, 0))
+        ttk.Entry(inner_form, textvariable=self.var_usuario, width=28).grid(row=1, column=1, sticky="w", padx=(0, 15),
+                                                                            pady=(10, 0))
+
+        ttk.Label(inner_form, text="Contraseña:").grid(row=1, column=2, sticky="w", padx=(0, 5), pady=(10, 0))
+        self.entry_password = ttk.Entry(inner_form, textvariable=self.var_password, width=18, show="*")
+        self.entry_password.grid(row=1, column=3, sticky="w", padx=(0, 5), pady=(10, 0))
 
         self.btn_show_pass = ttk.Button(inner_form, text="Mostrar", width=8, command=self._toggle_password_visibility)
-        self.btn_show_pass.grid(row=0, column=6, sticky="w")
+        self.btn_show_pass.grid(row=1, column=4, sticky="w", pady=(10, 0))
 
+        # Botones
         btn_frame = ttk.Frame(inner_form)
-        btn_frame.grid(row=1, column=0, columnspan=7, sticky="e", pady=(15, 0))
+        btn_frame.grid(row=1, column=5, sticky="e", pady=(10, 0))
 
         ttk.Button(btn_frame, text="Limpiar", command=self._limpiar_formulario).pack(side="left", padx=(0, 10))
-        ttk.Button(btn_frame, text="Guardar", style="Primary.TButton", command=self._guardar_credencial).pack(side="left")
+        ttk.Button(btn_frame, text="Guardar", style="Primary.TButton", command=self._guardar_proveedor).pack(
+            side="left")
 
+        # Tabla de Proveedores Unificada
         self.tree_frame = ttk.Frame(self.tab_proveedores)
         self.tree_frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        cols = ("id", "proveedor", "usuario", "password")
+        cols = ("id", "proveedor", "rfc", "alias", "usuario", "password")
         self.tree = ttk.Treeview(self.tree_frame, columns=cols, show="headings", style="Treeview")
 
         self.tree.heading("id", text="ID")
         self.tree.heading("proveedor", text="Proveedor")
+        self.tree.heading("rfc", text="RFC")
+        self.tree.heading("alias", text="Alias")
         self.tree.heading("usuario", text="Usuario")
         self.tree.heading("password", text="Contraseña")
 
-        self.tree.column("id", width=50, anchor="center")
-        self.tree.column("proveedor", width=300)
-        self.tree.column("usuario", width=250)
-        self.tree.column("password", width=150, anchor="center")
+        self.tree.column("id", width=40, anchor="center")
+        self.tree.column("proveedor", width=200)
+        self.tree.column("rfc", width=120, anchor="center")
+        self.tree.column("alias", width=200)
+        self.tree.column("usuario", width=150)
+        self.tree.column("password", width=100, anchor="center")
 
         self.tree.tag_configure("odd", background=pal["ROW_ALT"])
         self.tree.tag_configure("even", background=pal["SURFACE"])
@@ -116,18 +135,19 @@ class ProveedoresFrame(ttk.Frame):
         table_actions_frame = ttk.Frame(self.tab_proveedores)
         table_actions_frame.pack(fill="x", padx=12, pady=(0, 12))
 
-        ttk.Button(table_actions_frame, text="Exportar JSON", command=self._exportar_json).pack(side="left", padx=(0, 10))
+        ttk.Button(table_actions_frame, text="Exportar JSON", command=self._exportar_json).pack(side="left",
+                                                                                                padx=(0, 10))
         ttk.Button(table_actions_frame, text="Importar JSON", command=self._importar_json).pack(side="left")
 
         self.menu_prov = tk.Menu(self, tearoff=0)
         self.menu_prov.add_command(label="Cargar para Editar", command=self._cargar_edicion)
         self.menu_prov.add_separator()
-        self.menu_prov.add_command(label="Eliminar Proveedor", command=self._eliminar_credencial)
+        self.menu_prov.add_command(label="Eliminar Proveedor", command=self._eliminar_proveedor)
 
         self.tree.bind("<Button-3>", self._show_menu_prov)
 
     # ========================================================
-    # INTERFAZ: PESTAÑA SUCURSALES
+    # INTERFAZ: PESTAÑA SUCURSALES (Sin cambios)
     # ========================================================
     def _build_tab_sucursales(self, pal):
         suc_form = ttk.LabelFrame(self.tab_sucursales, text="Registrar / Editar Sucursal")
@@ -136,14 +156,12 @@ class ProveedoresFrame(ttk.Frame):
         inner_suc = ttk.Frame(suc_form)
         inner_suc.pack(fill="x", padx=10, pady=10)
 
-        # NUEVO: Combo para elegir el Proveedor dueño de la sucursal
         ttk.Label(inner_suc, text="Proveedor:").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
         self.var_suc_prov_id = tk.StringVar()
         self.cmb_suc_prov = ttk.Combobox(inner_suc, textvariable=self.var_suc_prov_id, state="readonly", width=25)
         self.cmb_suc_prov.grid(row=0, column=1, sticky="w", padx=(0, 15))
 
-        # Input del nombre de la sucursal
         ttk.Label(inner_suc, text="Nombre Sucursal:").grid(row=0, column=2, sticky="w", padx=(0, 5))
         ttk.Entry(inner_suc, textvariable=self.var_suc_nombre, width=25).grid(row=0, column=3, sticky="w", padx=(0, 15))
 
@@ -157,7 +175,6 @@ class ProveedoresFrame(ttk.Frame):
         self.tree_suc_frame = ttk.Frame(self.tab_sucursales)
         self.tree_suc_frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        # NUEVO: Le agregamos la columna de "proveedor" a la tabla
         self.tree_suc = ttk.Treeview(self.tree_suc_frame, columns=("id", "proveedor", "nombre"), show="headings",
                                      style="Treeview")
 
@@ -189,7 +206,6 @@ class ProveedoresFrame(ttk.Frame):
     # LÓGICA GENERAL
     # ========================================================
     def refresh_data(self):
-        # Refresca ambas tablas
         self._refresh_proveedores()
         self._refresh_sucursales()
 
@@ -208,7 +224,7 @@ class ProveedoresFrame(ttk.Frame):
             pass
 
     # ========================================================
-    # LÓGICA: PROVEEDORES
+    # LÓGICA: PROVEEDORES (Unificada)
     # ========================================================
     def _toggle_password_visibility(self):
         self._pass_visible = not self._pass_visible
@@ -222,6 +238,8 @@ class ProveedoresFrame(ttk.Frame):
     def _limpiar_formulario(self):
         self.var_id.set("")
         self.var_proveedor.set("")
+        self.var_rfc.set("")
+        self.var_alias.set("")
         self.var_usuario.set("")
         self.var_password.set("")
         self._pass_visible = False
@@ -234,45 +252,79 @@ class ProveedoresFrame(ttk.Frame):
 
         db = SessionLocal()
         try:
-            credenciales = db.query(ProveedorCredencial).all()
-            for index, c in enumerate(credenciales):
+            # Traemos todos los proveedores del catálogo
+            catalogos = db.query(CatalogoProveedor).all()
+            for index, cat in enumerate(catalogos):
+                # Buscamos si este proveedor tiene credenciales asociadas
+                cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=cat.nombre).first()
+                usuario = cred.usuario if cred else "-"
+                password_disp = "********" if cred else "-"
+
                 tag = "even" if index % 2 == 0 else "odd"
-                self.tree.insert("", "end", iid=str(c.id), values=(
-                    c.id, c.nombre_proveedor, c.usuario, "********"
+                self.tree.insert("", "end", iid=str(cat.id), values=(
+                    cat.id, cat.nombre, cat.rfc or "", cat.alias or "", usuario, password_disp
                 ), tags=(tag,))
         finally:
             db.close()
 
-    def _guardar_credencial(self):
+    def _guardar_proveedor(self):
         prov = self.var_proveedor.get().strip().upper()
+        rfc = self.var_rfc.get().strip().upper()
+        alias = self.var_alias.get().strip().upper()
         user = self.var_usuario.get().strip()
         pwd = self.var_password.get().strip()
-        record_id = self.var_id.get()
+        record_id = self.var_id.get()  # Guarda el ID de CatalogoProveedor
 
-        if not prov or not user or not pwd:
-            messagebox.showwarning("Datos incompletos", "Por favor, llena todos los campos.")
+        if not prov:
+            messagebox.showwarning("Atención", "El Nombre Oficial es obligatorio.")
             return
 
         db = SessionLocal()
         try:
+            nombre_anterior = prov
+
+            # 1. Guardar en Catálogo (Para el Parser)
             if record_id:
-                cred = db.query(ProveedorCredencial).get(int(record_id))
+                cat = db.query(CatalogoProveedor).get(int(record_id))
+                if cat:
+                    nombre_anterior = cat.nombre
+                    cat.nombre = prov
+                    cat.rfc = rfc
+                    cat.alias = alias
+            else:
+                existe = db.query(CatalogoProveedor).filter_by(nombre=prov).first()
+                if existe:
+                    messagebox.showerror("Error", "Este proveedor ya existe.")
+                    return
+                cat = CatalogoProveedor(nombre=prov, rfc=rfc, alias=alias)
+                db.add(cat)
+
+            # 2. Guardar en Credenciales (Para el Bot)
+            cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=nombre_anterior).first()
+
+            if user and pwd:
                 if cred:
                     cred.nombre_proveedor = prov
                     cred.usuario = user
                     cred.password_encriptado = encrypt_password(pwd)
-            else:
-                existe = db.query(ProveedorCredencial).filter_by(nombre_proveedor=prov).first()
-                if existe:
-                    messagebox.showerror("Error", "Este proveedor ya existe en la base de datos.")
-                    return
-                nueva_cred = ProveedorCredencial(nombre_proveedor=prov, usuario=user, password_encriptado=encrypt_password(pwd))
-                db.add(nueva_cred)
+                else:
+                    nueva_cred = ProveedorCredencial(nombre_proveedor=prov, usuario=user,
+                                                     password_encriptado=encrypt_password(pwd))
+                    db.add(nueva_cred)
+            elif cred:
+                # Si borró el usuario/pass pero ya existía, solo le actualizamos el nombre
+                cred.nombre_proveedor = prov
 
             db.commit()
+
+            # ¡MAGIA! Refrescar la memoria del Parser al instante
+            from parser.legacy_excel_parser import cargar_proveedores_en_memoria
+            cargar_proveedores_en_memoria()
+
             self._limpiar_formulario()
-            self._refresh_proveedores()
-            self.controller.set_status("Credencial guardada correctamente.", auto_clear_ms=3000)
+            self.refresh_data()  # Actualiza ambas tablas
+            self.controller.set_status("Proveedor guardado correctamente.", auto_clear_ms=3000)
+
         except Exception as e:
             db.rollback()
             messagebox.showerror("Error", str(e))
@@ -289,54 +341,72 @@ class ProveedoresFrame(ttk.Frame):
         sel = self.tree.selection()
         if not sel: return
 
-        cred_id = int(sel[0])
+        cat_id = int(sel[0])
         db = SessionLocal()
         try:
-            cred = db.query(ProveedorCredencial).get(cred_id)
-            if cred:
-                self.var_id.set(str(cred.id))
-                self.var_proveedor.set(cred.nombre_proveedor)
-                self.var_usuario.set(cred.usuario)
-                self.var_password.set(decrypt_password(cred.password_encriptado))
+            cat = db.query(CatalogoProveedor).get(cat_id)
+            if cat:
+                self.var_id.set(str(cat.id))
+                self.var_proveedor.set(cat.nombre)
+                self.var_rfc.set(cat.rfc or "")
+                self.var_alias.set(cat.alias or "")
+
+                cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=cat.nombre).first()
+                if cred:
+                    self.var_usuario.set(cred.usuario)
+                    self.var_password.set(decrypt_password(cred.password_encriptado))
+                else:
+                    self.var_usuario.set("")
+                    self.var_password.set("")
         finally:
             db.close()
 
-    def _eliminar_credencial(self):
+    def _eliminar_proveedor(self):
         sel = self.tree.selection()
         if not sel: return
 
-        if messagebox.askyesno("Confirmar", f"¿Eliminar definitivamente {len(sel)} proveedor(es)?"):
+        if messagebox.askyesno("Confirmar",
+                               f"¿Eliminar definitivamente {len(sel)} proveedor(es)? Esto también eliminará sus sucursales."):
             db = SessionLocal()
             try:
-                # Bucle mágico que recorre todos los IDs seleccionados
                 for item_id in sel:
-                    cred = db.query(ProveedorCredencial).get(int(item_id))
-                    if cred:
-                        db.delete(cred)
+                    cat = db.query(CatalogoProveedor).get(int(item_id))
+                    if cat:
+                        # Buscamos si tiene credenciales para eliminarlas también (Cascade borra las sucursales)
+                        cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=cat.nombre).first()
+                        if cred:
+                            db.delete(cred)
+                        db.delete(cat)
                 db.commit()
+
+                from parser.legacy_excel_parser import cargar_proveedores_en_memoria
+                cargar_proveedores_en_memoria()
+
             finally:
                 db.close()
-            self._refresh_proveedores()
+            self.refresh_data()
             self._limpiar_formulario()
 
     def _exportar_json(self):
         db = SessionLocal()
         try:
-            proveedores = db.query(ProveedorCredencial).all()
-            if not proveedores:
+            catalogos = db.query(CatalogoProveedor).all()
+            if not catalogos:
                 messagebox.showinfo("Exportar", "No hay proveedores para exportar.")
                 return
 
             datos = []
-            for p in proveedores:
-                # Extraemos los nombres de las sucursales vinculadas a este proveedor
-                nombres_sucursales = [s.nombre for s in p.sucursales]
+            for cat in catalogos:
+                cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=cat.nombre).first()
+                sucursales = [s.nombre for s in cred.sucursales] if cred else []
 
                 datos.append({
-                    "nombre_proveedor": p.nombre_proveedor,
-                    "usuario": p.usuario,
-                    "password": decrypt_password(p.password_encriptado),
-                    "sucursales": nombres_sucursales  # <--- NUEVO
+                    "nombre_proveedor": cat.nombre,
+                    "rfc": cat.rfc or "",
+                    "alias": cat.alias or "",
+                    "usuario": cred.usuario if cred else "",
+                    "password": decrypt_password(cred.password_encriptado) if cred else "",
+                    "sucursales": sucursales
                 })
 
             ruta = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("Archivos JSON", "*.json")],
@@ -344,7 +414,7 @@ class ProveedoresFrame(ttk.Frame):
             if ruta:
                 with open(ruta, 'w', encoding='utf-8') as f:
                     json.dump(datos, f, indent=4)
-                messagebox.showinfo("Éxito", f"Se exportaron {len(datos)} proveedores con sus sucursales.")
+                messagebox.showinfo("Éxito", f"Se exportaron {len(datos)} proveedores con sus alias y sucursales.")
         except Exception as e:
             messagebox.showerror("Error", str(e))
         finally:
@@ -362,42 +432,59 @@ class ProveedoresFrame(ttk.Frame):
             agregados, actualizados = 0, 0
             for d in datos:
                 nombre = (d.get("nombre_proveedor") or "").strip().upper()
+                rfc = (d.get("rfc") or "").strip().upper()
+                alias = (d.get("alias") or "").strip().upper()
                 usuario = d.get("usuario")
                 password = d.get("password")
-                sucursales_json = d.get("sucursales", [])  # <--- NUEVO
+                sucursales_json = d.get("sucursales", [])
 
-                if not nombre or not usuario or not password: continue
+                if not nombre: continue
 
-                prov = db.query(ProveedorCredencial).filter_by(nombre_proveedor=nombre).first()
-                if prov:
-                    prov.usuario = usuario
-                    prov.password_encriptado = encrypt_password(password)
+                # 1. Importar Catálogo (Parser)
+                cat = db.query(CatalogoProveedor).filter_by(nombre=nombre).first()
+                if cat:
+                    cat.rfc = rfc
+                    cat.alias = alias
                     actualizados += 1
                 else:
-                    prov = ProveedorCredencial(nombre_proveedor=nombre, usuario=usuario,
-                                               password_encriptado=encrypt_password(password))
-                    db.add(prov)
+                    cat = CatalogoProveedor(nombre=nombre, rfc=rfc, alias=alias)
+                    db.add(cat)
                     agregados += 1
 
-                # Forzamos a que la BD nos asigne un ID para el proveedor antes de crear sus sucursales
-                db.flush()
+                # 2. Importar Credenciales
+                if usuario and password:
+                    cred = db.query(ProveedorCredencial).filter_by(nombre_proveedor=nombre).first()
+                    if cred:
+                        cred.usuario = usuario
+                        cred.password_encriptado = encrypt_password(password)
+                    else:
+                        cred = ProveedorCredencial(nombre_proveedor=nombre, usuario=usuario,
+                                                   password_encriptado=encrypt_password(password))
+                        db.add(cred)
 
-                # <--- NUEVO: Reconstruimos las sucursales --->
-                for suc_nombre in sucursales_json:
-                    existe_suc = db.query(Sucursal).filter_by(nombre=suc_nombre, proveedor_id=prov.id).first()
-                    if not existe_suc:
-                        db.add(Sucursal(nombre=suc_nombre, proveedor_id=prov.id))
+                    db.flush()  # Forzamos que se asigne ID a la credencial
+
+                    # 3. Importar Sucursales
+                    for suc_nombre in sucursales_json:
+                        existe_suc = db.query(Sucursal).filter_by(nombre=suc_nombre, proveedor_id=cred.id).first()
+                        if not existe_suc:
+                            db.add(Sucursal(nombre=suc_nombre, proveedor_id=cred.id))
 
             db.commit()
+
+            from parser.legacy_excel_parser import cargar_proveedores_en_memoria
+            cargar_proveedores_en_memoria()
+
             messagebox.showinfo("Éxito", f"Importación completa.\nAgregados: {agregados}\nActualizados: {actualizados}")
             self.refresh_data()
         except Exception as e:
+            db.rollback()
             messagebox.showerror("Error", str(e))
         finally:
             db.close()
 
     # ========================================================
-    # LÓGICA: SUCURSALES
+    # LÓGICA: SUCURSALES (Sin cambios funcionales)
     # ========================================================
     def _limpiar_form_sucursal(self):
         self.var_suc_id.set("")
@@ -410,16 +497,13 @@ class ProveedoresFrame(ttk.Frame):
 
         db = SessionLocal()
         try:
-            # 1. Llenamos el combobox con los proveedores actualizados
             proveedores = db.query(ProveedorCredencial).all()
             lista_provs = [f"{p.id} - {p.nombre_proveedor}" for p in proveedores]
             self.cmb_suc_prov['values'] = lista_provs
 
-            # 2. Llenamos la tabla de sucursales (Ahora con 3 columnas)
             sucursales = db.query(Sucursal).all()
             for index, s in enumerate(sucursales):
                 tag = "even" if index % 2 == 0 else "odd"
-                # Extraemos el nombre gracias a la relación mágica de SQLAlchemy
                 nombre_prov = s.proveedor.nombre_proveedor if s.proveedor else "DESCONOCIDO"
 
                 self.tree_suc.insert("", "end", iid=str(s.id), values=(
@@ -431,13 +515,12 @@ class ProveedoresFrame(ttk.Frame):
     def _guardar_sucursal(self):
         nombre = self.var_suc_nombre.get().strip().upper()
         record_id = self.var_suc_id.get()
-        prov_seleccionado = self.cmb_suc_prov.get()  # Capturamos el proveedor
+        prov_seleccionado = self.cmb_suc_prov.get()
 
         if not nombre or not prov_seleccionado:
             messagebox.showwarning("Datos incompletos", "Elige un proveedor e ingresa el nombre de la sucursal.")
             return
 
-        # Sacamos el ID numérico del texto del combobox (ej: "1 - XISISA" -> 1)
         try:
             prov_id = int(prov_seleccionado.split(" - ")[0])
         except ValueError:
@@ -447,13 +530,11 @@ class ProveedoresFrame(ttk.Frame):
         db = SessionLocal()
         try:
             if record_id:
-                # Editar existente
                 suc = db.query(Sucursal).get(int(record_id))
                 if suc:
                     suc.nombre = nombre
                     suc.proveedor_id = prov_id
             else:
-                # Crear nuevo validando que no haya duplicados para el MISMO proveedor
                 existe = db.query(Sucursal).filter_by(nombre=nombre, proveedor_id=prov_id).first()
                 if existe:
                     messagebox.showerror("Error", "Esta sucursal ya existe para este proveedor.")
@@ -486,7 +567,6 @@ class ProveedoresFrame(ttk.Frame):
             if suc:
                 self.var_suc_id.set(str(suc.id))
                 self.var_suc_nombre.set(suc.nombre)
-                # Volvemos a seleccionar el proveedor en el combobox
                 if suc.proveedor:
                     self.var_suc_prov_id.set(f"{suc.proveedor.id} - {suc.proveedor.nombre_proveedor}")
         finally:

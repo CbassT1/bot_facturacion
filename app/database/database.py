@@ -106,40 +106,10 @@ engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_threa
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def seed_catalogo_proveedores():
-    """Inyecta los proveedores base si la tabla está vacía."""
-    db = SessionLocal()
-    try:
-        if db.query(CatalogoProveedor).count() == 0:
-            proveedores_por_defecto = [
-                ("MITAFSA", "", "MITAFSA, MITFSA"),
-                ("BETANSA", "BET150415QAA", "BETANSA"),
-                ("ARGONZA", "", "ARGONZA"),
-                ("REKLAMSA", "", "REKLAMSA"),
-                ("ERF", "", "ERF"),
-                ("EDETESA", "", "EDETESA"),
-                ("XISISA", "", "XISISA"),
-                ("GEREDAB", "", "GEREDAB"),
-                ("TIKSA", "", "TIKSA"),
-                ("VIESA", "", "VIESA"),
-                ("DIAFIMSA", "", "DIAFIMSA"),
-                ("ARMOLEB", "", "ARMOLEB"),
-                ("JOVIC", "", "JOVIC"),
-                ("COLMEXL", "", "COLMEXL"),
-                ("MARTO", "", "MARTO, GRUPOMARTINEZDELATORRE, MARTINEZDELATORRE"),
-                ("CHESTER", "", "CHESTER")
-            ]
-            for nom, rfc, alias in proveedores_por_defecto:
-                nuevo = CatalogoProveedor(nombre=nom, rfc=rfc, alias=alias)
-                db.add(nuevo)
-            db.commit()
-            print("Catálogo de proveedores inicializado con éxito.")
-    except Exception as e:
-        print(f"Error al inicializar catálogo: {e}")
-    finally:
-        db.close()
+
+    pass
 
 def obtener_proveedores_alias():
-    """Devuelve la lista de proveedores al Parser."""
     db = SessionLocal()
     try:
         filas = db.query(CatalogoProveedor.nombre, CatalogoProveedor.alias).all()
