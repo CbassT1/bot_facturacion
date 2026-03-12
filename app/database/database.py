@@ -117,6 +117,23 @@ def obtener_proveedores_alias():
     finally:
         db.close()
 
+
+class PagoGuardado(Base):
+    __tablename__ = "pagos_guardados"
+
+    id = Column(Integer, primary_key=True, index=True)
+    proveedor = Column(String)
+    sucursal = Column(String, default="MONTERREY")
+    folio_factura_origen = Column(String)
+    fecha_pago = Column(String)
+    hora_pago = Column(String, default="12:00:00")
+    forma_pago = Column(String, default="03 - Transferencia")
+    monto = Column(String)
+    enviar_correo = Column(Boolean, default=True)
+    estado = Column(String, default="Pendiente")
+    mensaje_error = Column(String, nullable=True)
+    fecha_creacion = Column(DateTime, default=datetime.utcnow)
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     seed_catalogo_proveedores()

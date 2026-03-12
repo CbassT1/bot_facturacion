@@ -13,86 +13,115 @@ class MenuPrincipalFrame(ttk.Frame):
     def _build_ui(self):
         pal = get_pal(self.controller)
 
-        # --- TOP BAR (Botón de Tema en la esquina superior derecha) ---
-        top_bar = ttk.Frame(self)
-        top_bar.pack(side="top", fill="x", padx=20, pady=15)
+        # ==========================================
+        # PANEL IZQUIERDO (Dashboard Sidebar)
+        # ==========================================
+        left_panel = tk.Frame(self, bg=pal["SURFACE2"], width=300)
+        left_panel.pack(side="left", fill="y")
+        left_panel.pack_propagate(False)
 
-        self.btn_theme = ttk.Button(top_bar, text=self.controller.theme_button_label(), command=self._toggle_theme)
-        self.btn_theme.pack(side="right")
+        # Branding
+        lbl_title = tk.Label(left_panel, text="FactBot", font=("Segoe UI", 32, "bold"), bg=pal["SURFACE2"],
+                             fg=pal["TEXT"])
+        lbl_title.pack(pady=(40, 5), anchor="w", padx=30)
 
-        # --- FOOTER (Versión en la esquina inferior derecha) ---
-        footer_frame = ttk.Frame(self)
-        footer_frame.pack(side="bottom", fill="x", padx=20, pady=15)
+        lbl_sub = tk.Label(left_panel, text="Panel de Control", font=("Segoe UI", 12), bg=pal["SURFACE2"],
+                           fg=pal["MUTED"])
+        lbl_sub.pack(anchor="w", padx=30, pady=(0, 30))
 
-        ttk.Label(footer_frame, text="Versión 1.0", style="Muted.TLabel").pack(side="right")
+        # Opciones Laterales (Botones arreglados para no verse negros al clic)
+        self.btn_theme = tk.Button(
+            left_panel,
+            text=self.controller.theme_button_label(),
+            command=self._toggle_theme,
+            bg=pal["BG"],
+            fg=pal["TEXT"],
+            activebackground=pal["ACCENT"],  # Color al hacer clic
+            activeforeground="#FFFFFF",  # Texto al hacer clic
+            relief="flat",
+            cursor="hand2",
+            font=("Segoe UI", 10),
+            pady=5
+        )
+        self.btn_theme.pack(fill="x", padx=30, pady=10)
 
-        # --- CONTENEDOR CENTRAL MAESTRO ---
-        master_container = ttk.Frame(self)
-        master_container.place(relx=0.5, rely=0.5, anchor="center")
+        # Panel de Estado Inferior
+        status_frame = tk.Frame(left_panel, bg=pal["SURFACE2"])
+        status_frame.pack(side="bottom", fill="x", padx=30, pady=30)
 
-        header_frame = ttk.Frame(master_container)
-        header_frame.pack(fill="x", pady=(0, 45))
+        tk.Label(status_frame, text="Usuario: Administrador", font=("Segoe UI", 9, "bold"), bg=pal["SURFACE2"],
+                 fg=pal["TEXT"], anchor="w").pack(fill="x")
+        tk.Label(status_frame, text="Base de Datos: Conectada", font=("Segoe UI", 9), bg=pal["SURFACE2"], fg="#4AF626",
+                 anchor="w").pack(fill="x", pady=(2, 10))
+        tk.Label(status_frame, text="Version 1.0", font=("Segoe UI", 9), bg=pal["SURFACE2"], fg=pal["MUTED"],
+                 anchor="w").pack(fill="x")
 
-        ttk.Label(header_frame, text="FactBot", font=("Segoe UI", 36, "bold")).pack(anchor="center")
-        ttk.Label(header_frame, text="Panel de Control Principal", font=("Segoe UI", 13), style="Muted.TLabel").pack(
-            anchor="center", pady=(5, 0))
+        # ==========================================
+        # PANEL DERECHO (Cuadricula de tarjetas)
+        # ==========================================
+        right_panel = tk.Frame(self, bg=pal["BG"])
+        right_panel.pack(side="right", fill="both", expand=True)
 
-        # --- CUADRÍCULA DE MÓDULOS (Tarjetas separadas) ---
-        grid_frame = ttk.Frame(master_container)
-        grid_frame.pack(expand=True)
+        lbl_seccion = tk.Label(right_panel, text="Modulos de Operacion", font=("Segoe UI", 16, "bold"), bg=pal["BG"],
+                               fg=pal["TEXT"])
+        lbl_seccion.pack(anchor="w", padx=40, pady=(40, 20))
 
-        def create_module_card(parent, title, desc, command, row, col):
+        grid_frame = tk.Frame(right_panel, bg=pal["BG"])
+        grid_frame.pack(fill="both", expand=True, padx=25)
+
+        def create_modern_card(parent, title, desc, command, row, col):
+            # Tarjeta directa (Grosor fijo en 2 para evitar que el diseño brinque)
             card = tk.Frame(parent, bg=pal["SURFACE"], cursor="hand2", highlightbackground=pal["BORDER"],
                             highlightthickness=2)
-            card.grid(row=row, column=col, padx=20, pady=20, sticky="nsew")
+            card.grid(row=row, column=col, padx=15, pady=15, sticky="nsew")
 
-            inner = tk.Frame(card, bg=pal["SURFACE"], cursor="hand2")
-            inner.place(relx=0.5, rely=0.5, anchor="center")
+            lbl_t = tk.Label(card, text=title, font=("Segoe UI", 13, "bold"), bg=pal["SURFACE"], fg=pal["TEXT"],
+                             cursor="hand2")
+            lbl_t.pack(pady=(20, 5), padx=20, anchor="w")
 
-            lbl_title = tk.Label(inner, text=title, font=("Segoe UI", 15, "bold"), bg=pal["SURFACE"], fg=pal["TEXT"],
-                                 cursor="hand2")
-            lbl_title.pack(pady=(0, 6))
+            lbl_d = tk.Label(card, text=desc, font=("Segoe UI", 10), bg=pal["SURFACE"], fg=pal["MUTED"], cursor="hand2",
+                             justify="left", wraplength=220)
+            lbl_d.pack(padx=20, pady=(0, 20), anchor="nw", fill="x")
 
-            lbl_desc = tk.Label(inner, text=desc, font=("Segoe UI", 10), bg=pal["SURFACE"], fg=pal["MUTED"],
-                                cursor="hand2")
-            lbl_desc.pack()
-
+            # Animacion estable: Solo cambiamos el color, no el tamaño fisico
             def on_enter(e):
-                card.configure(bg=pal["SURFACE2"], highlightbackground=pal["ACCENT"])
-                inner.configure(bg=pal["SURFACE2"])
-                lbl_title.configure(bg=pal["SURFACE2"])
-                lbl_desc.configure(bg=pal["SURFACE2"])
+                card.configure(highlightbackground=pal["ACCENT"])
+                lbl_t.configure(fg=pal["ACCENT"])
 
             def on_leave(e):
-                card.configure(bg=pal["SURFACE"], highlightbackground=pal["BORDER"])
-                inner.configure(bg=pal["SURFACE"])
-                lbl_title.configure(bg=pal["SURFACE"])
-                lbl_desc.configure(bg=pal["SURFACE"])
+                card.configure(highlightbackground=pal["BORDER"])
+                lbl_t.configure(fg=pal["TEXT"])
 
-            for w in (card, inner, lbl_title, lbl_desc):
+            for w in (card, lbl_t, lbl_d):
                 w.bind("<Button-1>", lambda e: command())
                 w.bind("<Enter>", on_enter)
                 w.bind("<Leave>", on_leave)
 
-        # Generamos las tarjetas
-        create_module_card(grid_frame, "Nueva Emisión", "Leer y aprobar archivos Excel o PDF",
+        # Fila 0
+        create_modern_card(grid_frame, "Nueva Emision", "Leer y aprobar facturas desde Excel o PDF.",
                            lambda: self.controller.show("hacer"), 0, 0)
-        create_module_card(grid_frame, "Centro de Emisión", "Fila de trabajo, bot y registros",
+        create_modern_card(grid_frame, "Centro de Emision", "Fila de trabajo, estatus del bot y registros.",
                            lambda: self.controller.show("pendientes"), 0, 1)
-        create_module_card(grid_frame, "Catálogos", "Proveedores, Credenciales y Sucursales",
-                           lambda: self.controller.show("proveedores"), 1, 0)
-        create_module_card(grid_frame, "Reportes Locales", "Generar y exportar métricas",
-                           lambda: self.controller.show("reportes"), 1, 1)
-        create_module_card(grid_frame, "Ajuste de Formatos", "Reparar Excels con formato dañado",
-                           lambda: self.controller.show("ajustar"), 2, 0)
-        create_module_card(grid_frame, "Clonador de Facturas", "Duplicar facturas con nuevos montos",
-                           lambda: self.controller.show("clonador"), 2, 1)
 
-        grid_frame.columnconfigure(0, minsize=340)
-        grid_frame.columnconfigure(1, minsize=340)
-        grid_frame.rowconfigure(0, minsize=160)
-        grid_frame.rowconfigure(1, minsize=160)
-        grid_frame.rowconfigure(2, minsize=160)
+        # Fila 1
+        create_modern_card(grid_frame, "Complementos de Pago", "Aplica pagos a folios previos y emite recibos.",
+                           lambda: self.controller.show("HacerPagosFrame"), 1, 0)
+        create_modern_card(grid_frame, "Clonador de Facturas", "Duplica facturas existentes con nuevos montos.",
+                           lambda: self.controller.show("clonador"), 1, 1)
+
+        # Fila 2
+        create_modern_card(grid_frame, "Catalogos de Sistema", "Configura Proveedores, Accesos y Sucursales.",
+                           lambda: self.controller.show("proveedores"), 2, 0)
+        create_modern_card(grid_frame, "Reportes Locales", "Genera y exporta metricas de facturacion.",
+                           lambda: self.controller.show("reportes"), 2, 1)
+
+        # Fila 3
+        create_modern_card(grid_frame, "Ajuste de Formatos", "Herramienta para reparar Excels con formato dañado.",
+                           lambda: self.controller.show("ajustar"), 3, 0)
+
+        # Configuracion simetrica
+        grid_frame.columnconfigure(0, minsize=320, weight=1)
+        grid_frame.columnconfigure(1, minsize=320, weight=1)
 
     def _toggle_theme(self):
         self.controller.toggle_theme()

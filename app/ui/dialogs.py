@@ -80,3 +80,48 @@ class ConfirmDialog(tk.Toplevel):
     def _no(self):
         self.result_yes = False
         self.destroy()
+
+
+class LogDialog(tk.Toplevel):
+    def __init__(self, parent, title="Ejecución del Bot"):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+
+        pal = get_pal(parent)
+        self.configure(bg=pal["BG"])
+
+        # Frame principal
+        main_frame = ttk.Frame(self, padding=15)
+        main_frame.pack(fill="both", expand=True)
+
+        # Titulo
+        ttk.Label(main_frame, text="📡 Consola en Vivo:", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 5))
+
+        # Text Widget para los logs (con estilo de terminal de hacker)
+        self.txt_logs = tk.Text(main_frame, wrap="word", font=("Consolas", 10), bg="#1E1E1E", fg="#4AF626", height=20)
+        self.txt_logs.pack(fill="both", expand=True, pady=5)
+
+        # Scrollbar integrada
+        scrollbar = ttk.Scrollbar(self.txt_logs, orient="vertical", command=self.txt_logs.yview)
+        self.txt_logs.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        # Botón para ocultar/cerrar la ventana
+        self.btn_cerrar = ttk.Button(main_frame, text="Cerrar Consola", command=self.destroy)
+        self.btn_cerrar.pack(pady=(10, 0))
+
+        self.update_idletasks()
+        _center_toplevel_on_parent(parent, self, 700, 450)
+
+    def add_log(self, mensaje: str):
+        """
+        Imprime un mensaje en la consola del bot.
+        Usa self.after(0, ...) para ser "Thread-Safe" y no congelar la UI de Tkinter.
+        """
+
+        def _escribir():
+            self.txt_logs.insert(tk.END, f"> {mensaje}\n")
+            self.txt_logs.see(tk.END)  # Hace auto-scroll hacia abajo
+
+        self.after(0, _escribir)
