@@ -1,38 +1,31 @@
+# app/ui/frames/hacer_facturas.py
 from __future__ import annotations
-
-import os
 import threading
-from pathlib import Path
-from typing import TYPE_CHECKING, List
-
+from typing import TYPE_CHECKING
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, messagebox
 
-from app.ui.utils import (
-    center_toplevel_on_parent,
-    open_file_native,
-    parse_dnd_file_list,
-)
-from app.ui.theme import get_pal, restyle_listbox
+from app.ui.utils import center_toplevel_on_parent
+from app.ui.theme import get_pal
+
+# Importamos nuestro componente especialista
+from app.ui.frames.file_manager_panel import FileManagerPanel
 
 if TYPE_CHECKING:
     from app.ui.app import App
 
-try:
-    from tkinterdnd2 import DND_FILES  # type: ignore
-
-    _HAS_DND = True
-except Exception:
-    DND_FILES = None
-    _HAS_DND = False
-
 
 class HacerFacturasFrame(ttk.Frame):
+    """
+    Controlador principal de la pantalla de Nueva Emisión.
+    Delega el UI a FileManagerPanel y maneja el Hilo de Procesamiento (Parser).
+    """
+
     def __init__(self, master: ttk.Frame, controller: "App"):
         super().__init__(master)
         self.controller = controller
-        self._paths: List[str] = []
 
+        # --- Cabecera ---
         header = ttk.Frame(self)
         header.pack(fill="x", padx=16, pady=(16, 10))
 
@@ -40,187 +33,40 @@ class HacerFacturasFrame(ttk.Frame):
         ttk.Label(header, text="Nueva Emisión", font=("Segoe UI", 16, "bold")).pack(side="left", padx=(12, 0))
         ttk.Button(header, text=self.controller.theme_button_label(), command=self._toggle_theme).pack(side="right")
 
+        # --- Cuerpo Central (Delegado al Componente) ---
         body = ttk.Frame(self)
         body.pack(fill="both", expand=True, padx=16, pady=10)
 
-        drop = ttk.LabelFrame(body, text="Arrastra y suelta (opcional)")
-        drop.pack(fill="x", pady=(0, 10))
+        self.file_manager = FileManagerPanel(body, controller)
+        self.file_manager.pack(fill="both", expand=True)
 
-        pal = get_pal(self.controller)
-        dnd_text = "Arrastra aquí tus archivos" if _HAS_DND else "Drag & Drop no disponible"
-        self.drop_area = tk.Label(
-            drop,
-            text=dnd_text,
-            bg=pal["SURFACE2"],
-            fg=pal["TEXT"],
-            bd=1,
-            relief="solid",
-            padx=14,
-            pady=12,
-            font=("Segoe UI", 11),
-            anchor="w",
-        )
-        self.drop_area.pack(fill="x", padx=12, pady=12)
-
-        actions = ttk.Frame(body)
-        actions.pack(fill="x", pady=(0, 12))
-
-        ttk.Button(actions, text="Seleccionar archivos (Ctrl+O)", command=self._select_files).pack(side="left")
-        ttk.Button(actions, text="Limpiar lista", command=self._clear_files).pack(side="left", padx=(10, 0))
-
-        list_frame = ttk.LabelFrame(body, text="Archivos listos")
-        list_frame.pack(fill="both", expand=True)
-
-        self.listbox = tk.Listbox(
-            list_frame,
-            activestyle="none",
-            bg=pal["SURFACE"],
-            fg=pal["TEXT"],
-            selectbackground=pal["LIST_SELECT"],
-            selectforeground=pal["TEXT"],
-            highlightthickness=1,
-            highlightbackground=pal["BORDER"],
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 11),
-        )
-        self.listbox.configure(selectmode=tk.EXTENDED, exportselection=False)
-        self.listbox.pack(fill="both", expand=True, padx=12, pady=12)
-
-        self._files_clipboard = {"mode": None, "paths": []}
-        self._build_ready_files_menu()
-
-        self.listbox.bind("<Button-3>", self._on_ready_files_right_click)
-        self.listbox.bind("<Double-Button-1>", lambda _e: self._ready_open_selected())
-        self.listbox.bind("<Button-1>", lambda _e: (self.listbox.focus_set(), None))
-        self.listbox.bind("<Delete>", lambda _e: self._ready_remove_selected())
-
-        self.listbox.bind("<Control-c>", lambda _e: (self._ready_copy(), "break"))
-        self.listbox.bind("<Control-C>", lambda _e: (self._ready_copy(), "break"))
-        self.listbox.bind("<Control-x>", lambda _e: (self._ready_cut(), "break"))
-        self.listbox.bind("<Control-X>", lambda _e: (self._ready_cut(), "break"))
-        self.listbox.bind("<Control-v>", lambda _e: (self._ready_paste(), "break"))
-        self.listbox.bind("<Control-V>", lambda _e: (self._ready_paste(), "break"))
-
-        # Arrastrar para seleccionar múltiples
-        def _drag_select(event):
-            idx = self.listbox.nearest(event.y)
-            if idx >= 0:
-                self.listbox.selection_set(idx)
-
-        self.listbox.bind("<B1-Motion>", _drag_select)
-
+        # --- Pie de página ---
         footer = ttk.Frame(body)
         footer.pack(fill="x", pady=(12, 0))
-        ttk.Button(footer, text="Continuar", style="Primary.TButton", command=self._continue).pack(side="right")
+        ttk.Button(footer, text="Continuar", style="Primary.TButton", command=self._procesar_archivos).pack(
+            side="right")
 
-        self._bind_dnd()
+    # --- Lógica de Procesamiento ---
+    def _procesar_archivos(self):
+        paths_list = self.file_manager.get_paths()
 
-    def _bind_dnd(self):
-        if not _HAS_DND:
-            return
-        for w in (self.drop_area, self.listbox):
-            try:
-                w.drop_target_register(DND_FILES)
-                w.dnd_bind("<<Drop>>", self._on_drop)
-            except Exception:
-                pass
-
-    def _on_drop(self, event):
-        paths = parse_dnd_file_list(str(event.data))
-        self._add_files(paths)
-
-    def _select_files(self):
-        last_dir = None
-        try:
-            if getattr(self.controller, "_settings", None) and getattr(self.controller._settings, "last_dir", ""):
-                last_dir = self.controller._settings.last_dir
-        except Exception:
-            pass
-
-        paths = filedialog.askopenfilenames(
-            title="Selecciona archivos",
-            initialdir=last_dir,
-            filetypes=[
-                ("Excel o PDF", "*.xlsx *.pdf"),
-                ("Excel", "*.xlsx"),
-                ("PDF", "*.pdf"),
-                ("Todos los archivos", "*.*"),
-            ],
-        )
-        if paths:
-            try:
-                first = str(paths[0])
-                parent = first.replace("\\", "/").rsplit("/", 1)[0]
-                if getattr(self.controller, "_settings", None):
-                    self.controller._settings.last_dir = parent
-            except Exception:
-                pass
-            self._add_files(list(paths))
-
-    def _add_files(self, paths: List[str]):
-        added = 0
-        for p in paths:
-            p = str(p)
-            ext = p.lower()
-            if not (ext.endswith(".xlsx") or ext.endswith(".pdf")):
-                continue
-            if p not in self._paths:
-                self._paths.append(p)
-                added += 1
-
-        if added:
-            self._refresh_list()
-            self.controller.set_status(
-                f"Se agregaron {added} archivo(s). Total: {len(self._paths)}.",
-                auto_clear_ms=2500,
-            )
-
-    def _clear_files(self):
-        self._paths = []
-        self._refresh_list()
-        self.controller.set_status("Lista limpiada.", auto_clear_ms=1500)
-
-    def _refresh_list(self):
-        self.listbox.delete(0, tk.END)
-        for p in self._paths:
-            self.listbox.insert(tk.END, Path(p).name)
-
-    # --- CORRECCIÓN: Borrado múltiple iterando en reversa ---
-    def _ready_remove_selected(self):
-        sel = self.listbox.curselection()
-        if not sel:
-            return
-
-        eliminados = 0
-        for idx in reversed(sel):
-            try:
-                self._paths.pop(int(idx))
-                eliminados += 1
-            except Exception:
-                continue
-
-        self._refresh_list()
-        self.controller.set_status(f"Se eliminaron {eliminados} archivo(s).", auto_clear_ms=1500)
-
-    def _continue(self):
-        if not self._paths:
+        if not paths_list:
             messagebox.showwarning("Sin archivos", "Agrega al menos un archivo .xlsx para continuar.", parent=self)
             return
 
+        # Modal de Carga
         dlg = tk.Toplevel(self)
         dlg.title("Procesando")
         dlg.transient(self.winfo_toplevel())
         dlg.grab_set()
         dlg.resizable(False, False)
-
-        pal = get_pal(self.controller)
-        dlg.configure(bg=pal["BG"])
+        dlg.configure(bg=get_pal(self.controller)["BG"])
 
         wrap = ttk.Frame(dlg)
         wrap.pack(padx=18, pady=16)
         ttk.Label(wrap, text="Procesando archivos...", font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        ttk.Label(wrap, text=f"Archivos: {len(self._paths)}", style="Muted.TLabel").pack(anchor="w", pady=(4, 10))
+        ttk.Label(wrap, text=f"Archivos a parsear: {len(paths_list)}", style="Muted.TLabel").pack(anchor="w",
+                                                                                                  pady=(4, 10))
 
         pb = ttk.Progressbar(wrap, mode="indeterminate", length=360)
         pb.pack(fill="x")
@@ -228,59 +74,48 @@ class HacerFacturasFrame(ttk.Frame):
 
         dlg.update_idletasks()
         center_toplevel_on_parent(self.controller, dlg, 440, 150)
+        self.controller.set_status(f"Procesando {len(paths_list)} archivo(s)...")
 
-        self.controller.set_status(f"Procesando {len(self._paths)} archivo(s)...")
+        self.controller._last_input_paths = list(paths_list)
 
-        def _close_dialog():
-            try:
-                pb.stop()
-            except Exception:
-                pass
-            try:
-                dlg.grab_release()
-            except Exception:
-                pass
-            try:
-                dlg.destroy()
-            except Exception:
-                pass
-
-        self.controller._last_input_paths = list(self._paths)
-
+        # El Trabajo Pesado (Thread)
         def _worker():
             try:
-                facturas = self.controller.parse_excel_files(self._paths)
+                facturas = self.controller.parse_excel_files(paths_list)
                 err = None
             except Exception as e:
                 facturas = []
                 err = e
 
-            def _done():
-                _close_dialog()
+            def _on_finish():
+                try:
+                    pb.stop()
+                except:
+                    pass
+                try:
+                    dlg.destroy()
+                except:
+                    pass
+
                 if err is not None:
-                    self.controller.set_status("Error al procesar archivos.")
-                    messagebox.showerror(
-                        "Error al parsear",
-                        f"No se pudieron leer los archivos.\n\nDetalle:\n{err}",
-                        parent=self,
-                    )
+                    self.controller.set_status("Error crítico al procesar archivos.")
+                    messagebox.showerror("Error al parsear", f"No se pudieron leer los archivos.\n\nDetalle:\n{err}",
+                                         parent=self)
                     return
                 if not facturas:
                     self.controller.set_status("Sin facturas detectadas.", auto_clear_ms=2500)
-                    messagebox.showwarning(
-                        "Sin facturas",
-                        "No se detectaron facturas/hojas visibles en los archivos.",
-                        parent=self,
-                    )
+                    messagebox.showwarning("Sin facturas", "No se detectaron facturas/hojas válidas en los archivos.",
+                                           parent=self)
                     return
 
-                self._clear_files()
+                self.file_manager.clear_files()
                 self.controller.open_visor(facturas)
 
-            self.controller.after(0, _done)
+            self.controller.after(0, _on_finish)
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    # --- Delegación de UI y Atajos ---
     def _toggle_theme(self):
         self.controller.toggle_theme()
 
@@ -290,187 +125,9 @@ class HacerFacturasFrame(ttk.Frame):
             if isinstance(w, ttk.Button) and w.cget("text") in ("Modo claro", "Modo oscuro"):
                 w.configure(text=self.controller.theme_button_label())
 
-        restyle_listbox(self.controller, self.listbox)
-        pal = get_pal(self.controller)
-        self.drop_area.configure(bg=pal["SURFACE2"], fg=pal["TEXT"], highlightbackground=pal["BORDER"])
+        # Le avisamos al componente que el tema cambió
+        self.file_manager.on_theme_changed()
 
-    # -------- menú contextual --------
-    def _build_ready_files_menu(self):
-        self._ready_menu = tk.Menu(self, tearoff=False)
-        self._ready_menu.add_command(label="Abrir archivo", command=self._ready_open_selected)
-        self._ready_menu.add_command(label="Ver ruta", command=self._ready_show_path)
-        self._ready_menu.add_separator()
-        self._ready_menu.add_command(label="Copiar nombre", command=self._ready_copy_name)
-        self._ready_menu.add_command(label="Copiar ruta", command=self._ready_copy_path)
-        self._ready_menu.add_separator()
-        self._ready_menu.add_command(label="Cortar", command=self._ready_cut)
-        self._ready_menu.add_command(label="Copiar", command=self._ready_copy)
-        self._ready_menu.add_command(label="Pegar", command=self._ready_paste)
-        self._ready_menu.add_separator()
-        self._ready_menu.add_command(label="Duplicar", command=self._ready_duplicate)
-        self._ready_menu.add_command(label="Renombrar archivo...", command=self._ready_rename_on_disk)
-        self._ready_menu.add_separator()
-        self._ready_menu.add_command(label="Eliminar de la lista", command=self._ready_remove_selected)
-
-    def _on_ready_files_right_click(self, event):
-        idx = self.listbox.nearest(event.y)
-        if idx >= 0:
-            current = set(self.listbox.curselection())
-            if idx not in current:
-                self.listbox.selection_clear(0, tk.END)
-                self.listbox.selection_set(idx)
-                self.listbox.activate(idx)
-
-        has_sel = bool(self.listbox.curselection())
-        can_paste = bool(self._files_clipboard.get("paths"))
-
-        def st(label, enabled):
-            try:
-                self._ready_menu.entryconfigure(label, state=("normal" if enabled else "disabled"))
-            except Exception:
-                pass
-
-        for lbl in (
-                "Abrir archivo",
-                "Ver ruta",
-                "Copiar nombre",
-                "Copiar ruta",
-                "Cortar",
-                "Copiar",
-                "Duplicar",
-                "Renombrar archivo...",
-                "Eliminar de la lista",
-        ):
-            st(lbl, has_sel)
-        st("Pegar", can_paste)
-
-        try:
-            self._ready_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            try:
-                self._ready_menu.grab_release()
-            except Exception:
-                pass
-
-    def _ready_get_selected_paths(self):
-        sel = self.listbox.curselection()
-        if not sel:
-            return []
-        return [self._paths[int(i)] for i in sel if 0 <= int(i) < len(self._paths)]
-
-    def _ready_open_selected(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-        # Abre el primer archivo seleccionado
-        open_file_native(paths[0], parent=self)
-
-    def _ready_show_path(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-        messagebox.showinfo("Ruta", str(paths[0]), parent=self)
-
-    def _ready_copy_name(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-        name = Path(paths[0]).name
-        self.clipboard_clear()
-        self.clipboard_append(name)
-
-    def _ready_copy_path(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-        self.clipboard_clear()
-        self.clipboard_append(str(paths[0]))
-
-    def _ready_copy(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-        self._files_clipboard = {"mode": "copy", "paths": list(paths)}
-
-    def _ready_cut(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-
-        self._files_clipboard = {"mode": "cut", "paths": list(paths)}
-        cut_set = set(paths)
-        self._paths = [p for p in self._paths if p not in cut_set]
-        self._refresh_list()
-
-        try:
-            self.controller.set_status(f"Cortado: {len(paths)} archivo(s).", auto_clear_ms=1500)
-        except Exception:
-            pass
-
-    def _ready_paste(self):
-        mode = self._files_clipboard.get("mode")
-        clip_paths = list(self._files_clipboard.get("paths") or [])
-        if not clip_paths:
-            return
-
-        sel = self.listbox.curselection()
-        insert_at = (max(sel) + 1) if sel else len(self._paths)
-        insert_at = min(insert_at, len(self._paths))
-
-        if mode == "cut":
-            for p in clip_paths:
-                self._paths.insert(insert_at, p)
-                insert_at += 1
-            self._files_clipboard = {"mode": None, "paths": []}
-        else:
-            for p in clip_paths:
-                self._paths.insert(insert_at, p)
-                insert_at += 1
-
-        self._refresh_list()
-
-    def _ready_duplicate(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-        for p in paths:
-            self._paths.append(p)
-        self._refresh_list()
-
-    def _ready_rename_on_disk(self):
-        paths = self._ready_get_selected_paths()
-        if not paths:
-            return
-        old_path = Path(paths[0])
-        if not old_path.exists():
-            messagebox.showerror("No encontrado", f"No existe:\n{old_path}", parent=self)
-            return
-
-        new_name = simpledialog.askstring(
-            "Renombrar",
-            "Nuevo nombre (con extensión):",
-            initialvalue=old_path.name,
-            parent=self,
-        )
-        if not new_name:
-            return
-        new_name = new_name.strip()
-        if not new_name:
-            return
-
-        new_path = old_path.with_name(new_name)
-        if new_path.exists():
-            messagebox.showerror("Ya existe", f"Ya existe:\n{new_path.name}", parent=self)
-            return
-
-        try:
-            old_path.rename(new_path)
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo renombrar:\n{e}", parent=self)
-            return
-
-        for i, p in enumerate(self._paths):
-            if Path(p) == old_path:
-                self._paths[i] = str(new_path)
-
-        self._refresh_list()
+    def _select_files(self):
+        """Este método es llamado por el atajo Ctrl+O definido en app.py"""
+        self.file_manager.trigger_select_files()
